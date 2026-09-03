@@ -152,3 +152,9 @@ pub async fn side_browser_snapshot(app: AppHandle, label: String) -> Result<Stri
 pub fn side_browser_install_download_hook(app: AppHandle, label: String) -> Result<(), String> {
     crate::side_browser_blob::install_hook(&app, label)
 }
+
+/// Frontend reports the Browser tab the user is looking at (MCP default target).
+#[tauri::command]
+pub fn side_browser_set_focus(label: String) -> Result<(), String> {
+    side_browser_host::set_focus(label)
+}

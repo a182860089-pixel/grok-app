@@ -65,8 +65,10 @@ mod wsl_backend;
 
 mod ssh_remote;
 
+mod side_browser_a11y;
 mod side_browser_blob;
 mod side_browser_host;
+mod side_browser_mcp;
 
 mod commands;
 
@@ -252,6 +254,9 @@ use session_manager::SessionManager;
 pub fn run() {
     // Session list / continue-by-id CLI must not open a window or steal focus
     // via the single-instance plugin. Exit before any Tauri builder setup.
+    if side_browser_mcp::try_run_stdio() {
+        std::process::exit(side_browser_mcp::run_stdio());
+    }
     if session_api::try_run_cli() {
         std::process::exit(session_api::run_cli());
     }
@@ -305,6 +310,9 @@ pub fn run() {
             // Defense in depth: session CLI is handled before the builder.
             // If argv still arrives here, do not focus-steal the primary window.
             if session_api::parse_cli(&argv).is_ok() {
+                return;
+            }
+            if argv.iter().any(|a| a == side_browser_mcp::STDIO_FLAG) {
                 return;
             }
 
@@ -771,6 +779,21 @@ pub fn run() {
                             tracing::error!(
                                 error = %e,
                                 "media server failed to start — local media previews may break"
+                            );
+                        }
+                    }
+                    match side_browser_mcp::start(handle.clone()).await {
+                        Ok(h) => {
+                            tracing::info!(
+                                url = %h.endpoint.url,
+                                "embedded-browser mcp ready"
+                            );
+                            handle.manage(h);
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "embedded-browser mcp failed to start — in-app browser tools unavailable"
                             );
                         }
                     }
@@ -1759,6 +1782,8 @@ pub fn run() {
             commands::side_browser_snapshot,
 
             commands::side_browser_install_download_hook,
+
+            commands::side_browser_set_focus,
 
             pet_window::pet_prefs_get,
             pet_window::pet_prefs_set,

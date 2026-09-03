@@ -74,6 +74,10 @@ import {
   gateClockKey,
   resumeGateClock,
 } from "@/lib/gateClock";
+import {
+  agentOpenUrl,
+  EMBEDDED_BROWSER_AGENT_OPEN_EVENT,
+} from "@/lib/embeddedBrowserAgent";
 import { WallpaperMediaLayer } from "@/components/WallpaperMediaLayer";
 import { SidebarCliImportCta } from "@/components/SidebarCliImportCta";
 import { useCliCallLogImport } from "@/hooks/useCliCallLogImport";
@@ -2350,6 +2354,29 @@ export function AppWorkbench() {
     setResourceOpenTarget(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume once per target
   }, [resourceOpenTarget, layout.asideCollapsed]);
+
+  // Host MCP `browser_navigate` asks the UI to open the in-app Browser panel.
+  useEffect(() => {
+    if (!api.isDesktopHost()) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void api
+      .listen<{ url?: string | null }>(EMBEDDED_BROWSER_AGENT_OPEN_EVENT, (payload) => {
+        const url = agentOpenUrl(payload);
+        setResourceOpenTarget({ type: "url", url, title: url });
+      })
+      .then((fn) => {
+        unlisten = fn;
+        if (cancelled) unlisten();
+      })
+      .catch(() => {
+        /* host event bus not ready */
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof document === "undefined") return;

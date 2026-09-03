@@ -1348,11 +1348,11 @@ pub fn build_session_mcp_servers_with_opts(
         Vec::new()
     };
 
-    // Strip user-configured official-aux duplicates before App inject.
+    // Strip user-configured official-aux / in-app browser duplicates before App inject.
     arr.retain(|v| {
         v.get("name")
             .and_then(|n| n.as_str())
-            .map(|n| n != "official-aux")
+            .map(|n| n != "official-aux" && n != crate::side_browser_mcp::SERVER_NAME)
             .unwrap_or(true)
     });
 
@@ -1373,6 +1373,17 @@ pub fn build_session_mcp_servers_with_opts(
             );
         }
     }
+
+    // Always inject the in-app Browser MCP when the loopback listener is up
+    // so Agent can drive the same WebView the user is looking at (Cursor-style).
+    if let Some(entry) = crate::side_browser_mcp::acp_entry() {
+        tracing::info!(
+            target: "mcp_inject",
+            "injecting embedded-browser MCP (in-app WebView)"
+        );
+        arr.push(entry);
+    }
+
     Value::Array(arr)
 }
 
@@ -2328,6 +2339,10 @@ mod tests {
         // Empty cwd / no config — still a JSON array, never panic.
         let v = build_session_mcp_servers_for_connect(Some("/nonexistent/project/path"));
         assert!(v.is_array(), "connect inject must always yield an array");
+        // In-app browser MCP is injected only when the loopback listener is up.
+        // Name must not collide with official-aux.
+        assert_eq!(crate::side_browser_mcp::SERVER_NAME, "browser");
+        assert_ne!(crate::side_browser_mcp::SERVER_NAME, "official-aux");
     }
 
     #[test]

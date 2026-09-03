@@ -154,6 +154,11 @@ export async function sideBrowserInstallDownloadHook(label: string) {
   return invoke<void>("side_browser_install_download_hook", { label });
 }
 
+/** Tell Host which Browser tab the user is looking at (Agent MCP default). */
+export async function sideBrowserSetFocus(label: string) {
+  return invoke<void>("side_browser_set_focus", { label });
+}
+
 export interface NetworkProbeTarget {
   key: string;
   url: string;

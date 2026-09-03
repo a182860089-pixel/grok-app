@@ -37,9 +37,13 @@ use tauri::webview::{DownloadEvent, PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl};
 use tauri::{LogicalPosition, LogicalSize, Url};
 
-const LABEL_PREFIX: &str = "resource-browser";
+pub const LABEL_PREFIX: &str = "resource-browser";
 const DOWNLOAD_EVENT: &str = "side-browser://download";
 const PAGE_LOAD_EVENT: &str = "side-browser://page-load";
+
+/// Last Browser panel the user (or Agent open) focused. MCP tools default here.
+static FOCUSED_LABEL: LazyLock<Mutex<Option<String>>> =
+    LazyLock::new(|| Mutex::new(None));
 
 /// url → staging path chosen in `Requested` (macOS finish omits path).
 static PENDING_DOWNLOADS: LazyLock<Mutex<HashMap<String, PendingDownload>>> =
@@ -100,7 +104,7 @@ fn emit_page_load(app: &AppHandle, phase: &str, label: &str, url: &str) {
     }
 }
 
-fn validate_label(label: &str) -> Result<(), String> {
+pub(crate) fn validate_label(label: &str) -> Result<(), String> {
     let t = label.trim();
     if t.is_empty() || t.len() > 96 {
         return Err("invalid webview label".into());
@@ -114,7 +118,7 @@ fn validate_label(label: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_side_label(label: &str) -> Result<(), String> {
+pub(crate) fn validate_side_label(label: &str) -> Result<(), String> {
     validate_label(label)?;
     if !label.starts_with(LABEL_PREFIX) {
         return Err(format!("side browser label must start with {LABEL_PREFIX}"));
@@ -122,7 +126,7 @@ fn validate_side_label(label: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_url(url: &str) -> Result<Url, String> {
+pub(crate) fn validate_url(url: &str) -> Result<Url, String> {
     let u = url.trim();
     if u.is_empty() {
         return Err("url empty".into());
@@ -630,10 +634,29 @@ pub fn create(
 /// Close a side-browser webview if present (no error when already gone).
 pub fn close(app: &AppHandle, label: String) -> Result<(), String> {
     validate_side_label(&label)?;
+    clear_focus_if(&label);
     if let Some(wv) = app.get_webview(&label) {
         wv.close().map_err(|e| format!("side browser close: {e}"))?;
     }
     Ok(())
+}
+
+/// Record the Browser panel the user is looking at (MCP default target).
+pub fn set_focus(label: String) -> Result<(), String> {
+    validate_side_label(&label)?;
+    *FOCUSED_LABEL.lock() = Some(label);
+    Ok(())
+}
+
+pub fn focused_label() -> Option<String> {
+    FOCUSED_LABEL.lock().clone()
+}
+
+fn clear_focus_if(label: &str) {
+    let mut g = FOCUSED_LABEL.lock();
+    if g.as_deref() == Some(label) {
+        *g = None;
+    }
 }
 
 /// List known side-browser webviews (label prefix `resource-browser`).
@@ -700,6 +723,18 @@ pub fn eval(app: &AppHandle, label: String, script: String) -> Result<String, St
         .map_err(|_| "eval timeout".to_string())
 }
 
+/// WK/WebView2 `eval` may JSON-encode a returned string. Unwrap that layer.
+pub fn decode_eval_result(raw: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() || t == "null" || t == "undefined" {
+        return String::new();
+    }
+    if let Ok(s) = serde_json::from_str::<String>(t) {
+        return s;
+    }
+    t.trim_matches('"').to_string()
+}
+
 /// Convenience: page snapshot for automation (title + href + body text sample).
 pub fn snapshot(app: &AppHandle, label: String) -> Result<String, String> {
     let script = r#"(function(){
@@ -734,6 +769,25 @@ mod tests {
     fn url_scheme_rules() {
         assert!(validate_url("https://example.com").is_ok());
         assert!(validate_url("javascript:alert(1)").is_err());
+    }
+
+    #[test]
+    fn decode_eval_unwraps_json_string() {
+        assert_eq!(
+            decode_eval_result("\"{\\\"ok\\\":true}\""),
+            "{\"ok\":true}"
+        );
+        assert_eq!(decode_eval_result("{\"ok\":true}"), "{\"ok\":true}");
+        assert_eq!(decode_eval_result("null"), "");
+    }
+
+    #[test]
+    fn focus_roundtrip() {
+        set_focus("resource-browser-tab1".into()).unwrap();
+        assert_eq!(focused_label().as_deref(), Some("resource-browser-tab1"));
+        clear_focus_if("resource-browser-tab1");
+        assert_eq!(focused_label(), None);
+        assert!(set_focus("other".into()).is_err());
     }
 
     #[test]

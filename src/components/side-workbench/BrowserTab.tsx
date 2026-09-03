@@ -95,6 +95,13 @@ export function BrowserTab({
   const composingRef = useRef(false);
   const webviewLabel = sideBrowserWebviewLabel(tabId);
   const localPreview = isLikelyInjectablePreviewUrl(url);
+
+  useEffect(() => {
+    if (!active || !api.isDesktopHost()) return;
+    void api.sideBrowserSetFocus(webviewLabel).catch(() => {
+      /* host not ready / label not created yet */
+    });
+  }, [active, webviewLabel]);
   const { status, selection, shot, clearSelection } = useBrowserDesignMode({
     label: webviewLabel,
     enabled: designMode,
