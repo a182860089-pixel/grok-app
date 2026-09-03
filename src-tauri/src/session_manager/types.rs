@@ -1180,8 +1180,79 @@ pub(super) fn is_local_media_fs_path(path: &str) -> bool {
     is_media_fs_path(&n)
 }
 
+/// Inner href of `![alt](href)` / `[alt](href)`.
+fn markdown_media_href(token: &str) -> Option<&str> {
+    let t = token.trim().trim_matches('`').trim();
+    let after_alt = if let Some(rest) = t.strip_prefix("![") {
+        rest
+    } else if let Some(rest) = t.strip_prefix('[') {
+        rest
+    } else {
+        return None;
+    };
+    let rb = after_alt.find("](")?;
+    let href = after_alt.get(rb + 2..)?;
+    let end = href.find(')')?;
+    let inner = href[..end].trim();
+    if inner.is_empty() {
+        None
+    } else {
+        Some(inner)
+    }
+}
+
+/// Session / project relative media (`images/1.jpg`, `outputs/x.png`).
+/// Never a POSIX/Windows absolute — those go through `is_plausible_local_media_abs`.
+pub(super) fn is_session_relative_media(path: &str) -> bool {
+    let raw = path.trim().trim_start_matches("./");
+    if raw.is_empty() || raw.contains("..") || raw.contains("://") {
+        return false;
+    }
+    if raw.starts_with('/') || raw.starts_with('\\') {
+        return false;
+    }
+    let b = raw.as_bytes();
+    if raw.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' {
+        return false;
+    }
+    if !is_media_fs_path(raw) {
+        return false;
+    }
+    let lower = raw.replace('\\', "/").to_ascii_lowercase();
+    const ROOTS: &[&str] = &[
+        "images/",
+        "image/",
+        "videos/",
+        "video/",
+        "outputs/",
+        "output/",
+        "assets/",
+        "media/",
+        "generated/",
+        "exports/",
+    ];
+    ROOTS.iter().any(|r| lower.starts_with(r)) || lower.contains('/')
+}
+
+fn probe_media_token(token: &str) -> Option<String> {
+    let inner = markdown_media_href(token).unwrap_or(token.trim());
+    if let Some(n) = normalize_media_ref(inner) {
+        if (n.starts_with("http://") || n.starts_with("https://")) && is_media_fs_path(&n) {
+            return Some(n);
+        }
+        if is_plausible_local_media_abs(&n) {
+            return Some(n);
+        }
+    }
+    if is_session_relative_media(inner) {
+        return Some(inner.replace('\\', "/"));
+    }
+    None
+}
+
 /// First media ref found in free text (MCP / markdown).
-/// Prefers remote https media URLs, then local absolute media paths.
+/// Prefers remote https media URLs, then local absolute media paths,
+/// then session-relative cites (`images/1.jpg`, `![image](images/1.jpg)`).
 pub(super) fn first_media_path_in_text(text: &str) -> Option<String> {
     // Explicit https://…media
     for token in text.split_whitespace() {
@@ -1192,19 +1263,22 @@ pub(super) fn first_media_path_in_text(text: &str) -> Option<String> {
             }
         }
     }
-    // ` /abs/path/to/file.jpg ` or `//cdn/…`
+    // ` /abs/path/to/file.jpg ` or `![image](images/1.jpg)` or `//cdn/…`
+    let mut relative: Option<String> = None;
     for part in text.split('`') {
         let p = part.trim();
-        if let Some(n) = normalize_media_ref(p) {
-            if is_media_fs_path(&n) {
-                // Prefer remote URLs and multi-segment local paths; skip
-                // single-segment false extracts like `/img_001.png`.
-                if n.starts_with("http://") || n.starts_with("https://") {
-                    return Some(n);
-                }
-                if is_plausible_local_media_abs(&n) {
-                    return Some(n);
-                }
+        if p.is_empty() {
+            continue;
+        }
+        if let Some(found) = probe_media_token(p) {
+            if found.starts_with("http://")
+                || found.starts_with("https://")
+                || is_plausible_local_media_abs(&found)
+            {
+                return Some(found);
+            }
+            if relative.is_none() {
+                relative = Some(found);
             }
         }
     }
@@ -1265,7 +1339,34 @@ pub(super) fn first_media_path_in_text(text: &str) -> Option<String> {
             }
         }
     }
-    None
+    // Markdown image / link href when not wrapped in ticks:
+    // `see ![](media/img_001.png)` must not yield `/img_001.png`.
+    let mut i = 0;
+    let bytes = text.as_bytes();
+    while i < bytes.len() {
+        if bytes[i] == b']' && i + 1 < bytes.len() && bytes[i + 1] == b'(' {
+            let start_h = i + 2;
+            let mut j = start_h;
+            while j < bytes.len() && bytes[j] != b')' && bytes[j] != b'\n' {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b')' {
+                if let Some(found) = probe_media_token(&text[start_h..j]) {
+                    if found.starts_with("http://")
+                        || found.starts_with("https://")
+                        || is_plausible_local_media_abs(&found)
+                    {
+                        return Some(found);
+                    }
+                    if relative.is_none() {
+                        relative = Some(found);
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    relative
 }
 
 /// Local media abs path worth attaching: real multi-segment FS path, not

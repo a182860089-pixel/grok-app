@@ -111,6 +111,7 @@ import {
 import {
   JOURNAL_REHYDRATE_RECONCILE,
   JOURNAL_REHYDRATE_RETRY_GAPS_MS,
+  RELATIVE_MEDIA_RETRY_GAPS_MS,
   shouldApplyLateStreamText,
   shouldHealJournalOnStreamDone,
   shouldIgnorePrematureStreamDone,
@@ -350,36 +351,59 @@ export function useSessionHostEvents(ctx: SessionHostEventsCtx) {
          * journal tail (and the markdown image) lands — openSession already
          * does this, which is why a session switch "fixes" missing cards.
          */
+        const relativeMediaRetryTimers = new Map<string, number>();
         const applyResolvedRelativeMedia = (
           sid: string | null | undefined,
           rows: ChatMessage[],
+          attempt = 0,
         ) => {
           if (!sid) return;
+          if (attempt === 0) {
+            const prevTimer = relativeMediaRetryTimers.get(sid);
+            if (prevTimer != null) window.clearTimeout(prevTimer);
+            relativeMediaRetryTimers.delete(sid);
+          }
           const rels = collectSessionRelativeMediaRefs(rows);
           if (!rels.length) return;
           void api
             .sessionResolveRelativeMedia(sid, rels)
             .then((list) => {
-              if (
-                cancelled ||
-                !list.length ||
-                c.viewingSessionIdRef.current !== sid
-              ) {
+              if (cancelled || c.viewingSessionIdRef.current !== sid) {
                 return;
               }
-              const resolved = list.map((a) => ({
-                path: a.path,
-                name: a.name || a.path.split(/[/\\]/).pop() || a.path,
-                isDir: !!a.isDir,
-              }));
-              c.patchSessionMessages(sid, (cur) =>
-                applyResolvedSessionMedia(cur, resolved),
-              );
+              if (list.length) {
+                const resolved = list.map((a) => ({
+                  path: a.path,
+                  name: a.name || a.path.split(/[/\\]/).pop() || a.path,
+                  isDir: !!a.isDir,
+                }));
+                c.patchSessionMessages(sid, (cur) =>
+                  applyResolvedSessionMedia(cur, resolved),
+                );
+              }
+              const gap = RELATIVE_MEDIA_RETRY_GAPS_MS[attempt];
+              if (list.length < rels.length && gap != null) {
+                const prevTimer = relativeMediaRetryTimers.get(sid);
+                if (prevTimer != null) window.clearTimeout(prevTimer);
+                const t = window.setTimeout(() => {
+                  if (cancelled) return;
+                  const latest =
+                    c.messagesBySessionRef.current.get(sid) ?? rows;
+                  applyResolvedRelativeMedia(sid, latest, attempt + 1);
+                }, gap);
+                relativeMediaRetryTimers.set(sid, t);
+              }
             })
             .catch(() => {
               /* best-effort — pathMap / next remount still apply */
             });
         };
+        cleanups.push(() => {
+          for (const t of relativeMediaRetryTimers.values()) {
+            window.clearTimeout(t);
+          }
+          relativeMediaRetryTimers.clear();
+        });
 
         /**
          * Heal missed stream tail from Host journal after early ready.

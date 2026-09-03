@@ -89,6 +89,13 @@ export function shouldHealJournalOnStreamDone(opts: {
 export const JOURNAL_REHYDRATE_RETRY_GAPS_MS = [400, 500, 800] as const;
 
 /**
+ * Extra `session_resolve_relative_media` delays after turn ready.
+ * image_gen often finishes citing `images/1.jpg` before the file is on disk,
+ * so the first resolve returns empty and chat cards stay gray until a remount.
+ */
+export const RELATIVE_MEDIA_RETRY_GAPS_MS = [250, 700, 1500] as const;
+
+/**
  * End-of-turn UI rehydrate must not re-parse agent `chat_history` / `updates`.
  * Host `post_turn_reconcile` already merged those rows. Passing `reconcile: true`
  * here stacked a second jsonl parse on `session_messages` while the Host still

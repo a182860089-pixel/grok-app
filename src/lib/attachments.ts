@@ -474,6 +474,23 @@ export function extractImagePathsFromContent(content: string): Attachment[] {
 }
 
 /**
+ * Pull a media path out of a code span / markdown image token.
+ * `` `![image](images/1.jpg)` ``, `![alt](videos/1.mp4)`, `images/1.jpg`.
+ */
+export function unwrapCitedMediaToken(token: string): string | null {
+  let t = (token || "").trim();
+  if (!t || t.length > 400) return null;
+  t = t.replace(/^`+/, "").replace(/`+$/, "").trim();
+  const md = t.match(/^!?\[[^\]]*]\(([^)\s]+)\)$/);
+  if (md?.[1]) t = md[1].trim();
+  t = t.replace(/^<|>$/g, "").replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!t || t.includes("://") || t.includes("..")) return null;
+  if (isSiteRootAbsolutePath(t) || isFusedQueryKeyPath(t)) return null;
+  if (!isMediaPath(t)) return null;
+  return t;
+}
+
+/**
  * Project / session relative media paths:
  * - Grok Build: `images/1.jpg`, `videos/1.mp4` (agent session dir)
  * - Skill outputs: `outputs/xhx-media-gen/foo.png` (project cwd)
@@ -516,6 +533,15 @@ export function extractSessionRelativeMediaRefs(content: string): string[] {
 
   const tickBareRe = new RegExp(`\`(${bareMedia})\``, "gi");
   while ((m = tickBareRe.exec(content)) !== null) push(m[1] || "", true);
+
+  // TUI / agent often wraps the whole markdown image in ticks:
+  // `![image](images/1.jpg)` — inner href is the session-relative cite.
+  const tickAnyRe = /`([^`\n]+)`/g;
+  while ((m = tickAnyRe.exec(content)) !== null) {
+    const inner = unwrapCitedMediaToken(m[1] || "");
+    if (!inner) continue;
+    push(inner, !inner.includes("/"));
+  }
 
   const linkRelRe = new RegExp(`\\[[^\\]]*\\]\\((${relMedia})\\)`, "gi");
   while ((m = linkRelRe.exec(content)) !== null) push(m[1] || "", false);
@@ -850,24 +876,25 @@ export function filterAttachmentsNotInlined(
     const name = pathBasename(a.path);
     const norm = a.path.replace(/\\/g, "/");
     const rel = mediaTailFromPath(norm);
-    if (rel && rels.has(rel)) return false;
-    if (absInText.has(a.path)) return false;
-    if (rel && content.includes(rel)) return false;
-    if (rels.has(name)) return false;
-    if ([...rels].some((r) => r === name || r.endsWith(`/${name}`))) {
-      return false;
-    }
-    if (
+    const cited =
+      (rel && rels.has(rel)) ||
+      absInText.has(a.path) ||
+      (rel && content.includes(rel)) ||
+      rels.has(name) ||
+      [...rels].some((r) => r === name || r.endsWith(`/${name}`)) ||
       content.includes(`\`${name}\``) ||
       content.includes(`\`${a.path}\``) ||
-      (rel && content.includes(`\`${rel}\``))
-    ) {
-      return false;
-    }
-    // Markdown link / image form (`![alt](rel)` or `](basename)`)
-    if (rel && content.includes(`](${rel})`)) return false;
-    if (content.includes(`](${name})`)) return false;
-    return true;
+      (rel && content.includes(`\`${rel}\``)) ||
+      (rel && content.includes(`](${rel})`)) ||
+      content.includes(`](${name})`);
+    if (!cited) return true;
+    // Only hide the bottom card when inline ImageUi can actually load this
+    // path. Relative-only cites used to double-drop: img returned null AND
+    // this filter hid the attachment because `](images/1.jpg)` was in the body.
+    const canPaintInline =
+      /^https?:\/\//i.test(a.path) ||
+      (isRealLocalAbsolutePath(a.path) && isPlausibleLocalMediaAbs(a.path));
+    return !canPaintInline;
   });
   return out.length ? out : undefined;
 }

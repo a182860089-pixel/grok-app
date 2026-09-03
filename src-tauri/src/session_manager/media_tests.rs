@@ -96,15 +96,32 @@ fn does_not_false_extract_relative_md_image_as_root_abs() {
     // Markdown in chat backups: `![](media/img_001.png)` used to yield `/img_001.png`
     // because the bare-path scanner started at the mid-relative `/`.
     let text = "see ![](media/img_001.png) and more";
-    assert!(
-        first_media_path_in_text(text).is_none(),
-        "unexpected {:?}",
-        first_media_path_in_text(text)
+    assert_eq!(
+        first_media_path_in_text(text).as_deref(),
+        Some("media/img_001.png"),
+        "relative markdown href, not /img_001.png"
     );
     assert!(!is_plausible_local_media_abs("/img_001.png"));
     assert!(is_plausible_local_media_abs(
         "/Users/me/chat/media/img_001.png"
     ));
+}
+
+#[test]
+fn extracts_session_relative_markdown_image() {
+    assert_eq!(
+        first_media_path_in_text("`![image](images/1.jpg)`").as_deref(),
+        Some("images/1.jpg")
+    );
+    assert_eq!(
+        first_media_path_in_text("saved images/2.png for you").as_deref(),
+        None,
+        "bare prose relative must not attach"
+    );
+    assert!(is_session_relative_media("images/1.jpg"));
+    assert!(is_session_relative_media("videos/1.mp4"));
+    assert!(!is_session_relative_media("/img_001.png"));
+    assert!(!is_session_relative_media("/Users/me/out/pixel.png"));
 }
 
 #[test]

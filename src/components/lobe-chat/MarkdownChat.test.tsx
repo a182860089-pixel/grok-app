@@ -73,6 +73,30 @@ describe("MarkdownChat", () => {
     expect(container.querySelectorAll("[data-find-mark]")).toHaveLength(2);
   });
 
+  it("paints tick-wrapped markdown images as ImageUi, not gray code", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownChat>{"`![image](images/1.jpg)`"}</MarkdownChat>,
+    );
+    expect(html).toContain("md-body__img-frame");
+    expect(html).not.toContain("chat-md__inline-code");
+  });
+
+  it("paints relative markdown images as ImageUi even without a path map", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownChat>{"![image](images/1.jpg)"}</MarkdownChat>,
+    );
+    expect(html).toContain("md-body__img-frame");
+  });
+
+  it("paints resolved session-relative images via path map", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownChat imagePathMap={{ "images/1.jpg": "/sess/images/1.jpg" }}>
+        {"![image](images/1.jpg)"}
+      </MarkdownChat>,
+    );
+    expect(html).toContain("md-body__img-frame");
+  });
+
   it("renders inline and display LaTeX with KaTeX", () => {
     const inline = renderToStaticMarkup(
       <MarkdownChat>{"Energy is $E=mc^2$."}</MarkdownChat>,

@@ -30,6 +30,7 @@ import {
   pathBasename,
   resolveInlineMediaToken,
   shouldReserveCitedMediaCard,
+  unwrapCitedMediaToken,
 } from "@/lib/attachments";
 import {
   fileSubtitle,
@@ -388,6 +389,8 @@ export const MarkdownChat = memo(function MarkdownChat({
     const renderPathOrUrl = (token: string, linkText?: string) => {
     const rawIn = token.trim().replace(/^<|>$/g, "");
     if (!rawIn) return null;
+    // `![image](images/1.jpg)` / `[image](videos/1.mp4)` inside ticks or prose.
+    const citedMedia = unwrapCitedMediaToken(rawIn);
     // Strip path:line[:col] before path resolution (soft-fail keeps original).
     const citeIn = parsePathLineCitation(rawIn);
     const citeNorm = parsePathLineCitation(normalizePathToken(rawIn) || rawIn);
@@ -429,6 +432,9 @@ export const MarkdownChat = memo(function MarkdownChat({
     }
 
     const mediaAbs =
+      (citedMedia
+        ? resolveInlineMediaToken(citedMedia, imagePathMap)
+        : null) ||
       resolveInlineMediaToken(raw, imagePathMap) ||
       resolveInlineMediaToken(pathForLooks, imagePathMap) ||
       resolveInlineMediaToken(rawIn, imagePathMap);
@@ -467,36 +473,43 @@ export const MarkdownChat = memo(function MarkdownChat({
       );
     }
 
+    // Session-relative cites must occupy ImageUi/VideoUi even before pathMap
+    // resolves. FilePathCard paints unresolved relatives as gray inline code
+    // (`![image](images/1.jpg)` / `images/1.jpg`) — that is the chat-image bug.
+    const reserveTok =
+      (citedMedia && shouldReserveCitedMediaCard(citedMedia)
+        ? citedMedia
+        : null) ||
+      (shouldReserveCitedMediaCard(raw) ? raw : null) ||
+      (shouldReserveCitedMediaCard(rawIn) ? rawIn : null);
+    if (reserveTok && isImagePath(reserveTok)) {
+      return (
+        <ImageUi
+          className="md-body__img md-body__img--card"
+          src={reserveTok}
+          alt={linkText || pathBasename(reserveTok)}
+          gallery={gallery}
+          labels={imageLabels}
+        />
+      );
+    }
+    if (reserveTok && isVideoPath(reserveTok)) {
+      return (
+        <VideoUi
+          key={reserveTok}
+          src={reserveTok}
+          title={linkText || pathBasename(reserveTok)}
+          labels={videoLabels}
+        />
+      );
+    }
+
     if (
       !looksLikeFilePath(rawIn) &&
       !looksLikeFilePath(raw) &&
       !looksLikeFilePath(pathForLooks) &&
       !mediaAbs
     ) {
-      // Cited `` `foo.png` `` / `images/1.jpg`: reserve the chat card box
-      // (150px height, cached aspect width) so load occupancy is known
-      // before Host resolves the abs path.
-      if (shouldReserveCitedMediaCard(raw) && isImagePath(raw)) {
-        return (
-          <ImageUi
-            className="md-body__img md-body__img--card"
-            src={raw}
-            alt={linkText || pathBasename(raw)}
-            gallery={gallery}
-            labels={imageLabels}
-          />
-        );
-      }
-      if (shouldReserveCitedMediaCard(raw) && isVideoPath(raw)) {
-        return (
-          <VideoUi
-            key={raw}
-            src={raw}
-            title={linkText || pathBasename(raw)}
-            labels={videoLabels}
-          />
-        );
-      }
       return null;
     }
 
@@ -680,6 +693,27 @@ export const MarkdownChat = memo(function MarkdownChat({
           typeof alt === "string" ? alt : undefined,
         );
         if (card) return card;
+        const cited = unwrapCitedMediaToken(src);
+        if (cited && shouldReserveCitedMediaCard(cited) && isImagePath(cited)) {
+          return (
+            <ImageUi
+              className="md-body__img md-body__img--card"
+              src={cited}
+              alt={typeof alt === "string" ? alt : pathBasename(cited)}
+              labels={imageLabels}
+            />
+          );
+        }
+        if (cited && shouldReserveCitedMediaCard(cited) && isVideoPath(cited)) {
+          return (
+            <VideoUi
+              key={cited}
+              src={cited}
+              title={typeof alt === "string" ? alt : pathBasename(cited)}
+              labels={videoLabels}
+            />
+          );
+        }
         const viewable =
           isHttpUrl(src) ||
           src.startsWith("data:") ||

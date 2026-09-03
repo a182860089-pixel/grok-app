@@ -7,6 +7,7 @@ import {
   extractMediaPathsFromContent,
   extractSessionRelativeMediaRefs,
   shouldReserveCitedMediaCard,
+  unwrapCitedMediaToken,
   filterAttachmentsNotInlined,
   filterEchoedUserAttachments,
   mediaTailFromPath,
@@ -281,6 +282,21 @@ also /tmp/other.png and /tmp/clip.mp4 and not a file.`;
     expect(
       extractSessionRelativeMediaRefs("[card](weather-card.png)"),
     ).toEqual(["weather-card.png"]);
+    // Whole markdown image wrapped in ticks (TUI citation)
+    expect(
+      extractSessionRelativeMediaRefs("`![image](images/1.jpg)`"),
+    ).toEqual(["images/1.jpg"]);
+  });
+
+  it("unwraps tick-wrapped markdown image tokens", () => {
+    expect(unwrapCitedMediaToken("`![image](images/1.jpg)`")).toBe(
+      "images/1.jpg",
+    );
+    expect(unwrapCitedMediaToken("![image](images/1.jpg)")).toBe("images/1.jpg");
+    expect(unwrapCitedMediaToken("images/1.jpg")).toBe("images/1.jpg");
+    expect(unwrapCitedMediaToken("`videos/1.mp4`")).toBe("videos/1.mp4");
+    expect(unwrapCitedMediaToken("/images/cms.png")).toBeNull();
+    expect(unwrapCitedMediaToken("https://x.com/a.png")).toBeNull();
   });
 
   it("resolveMediaHref maps link href to absolute via path map", () => {
@@ -446,6 +462,15 @@ also /tmp/other.png and /tmp/clip.mp4 and not a file.`;
     ]);
     expect(filterEchoedUserAttachments(user, user)).toBeUndefined();
     expect(filterEchoedUserAttachments(assistant, undefined)?.length).toBe(2);
+  });
+
+  it("filterAttachmentsNotInlined keeps relative-only cites until abs is known", () => {
+    const atts: Attachment[] = [
+      { path: "images/1.jpg", name: "1.jpg", isDir: false },
+    ];
+    const out = filterAttachmentsNotInlined("`![image](images/1.jpg)`", atts);
+    expect(out).toHaveLength(1);
+    expect(out![0]!.path).toBe("images/1.jpg");
   });
 
   it("filterAttachmentsNotInlined drops false-extract single-segment abs media", () => {

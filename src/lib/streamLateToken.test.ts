@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   JOURNAL_REHYDRATE_RECONCILE,
   JOURNAL_REHYDRATE_RETRY_GAPS_MS,
+  RELATIVE_MEDIA_RETRY_GAPS_MS,
   shouldApplyLateStreamText,
   shouldHealJournalOnStreamDone,
   shouldIgnorePrematureStreamDone,
@@ -217,6 +218,7 @@ describe("shouldHealJournalOnStreamDone", () => {
   it("retries long enough to cover Host post-turn journal flush", () => {
     const total = JOURNAL_REHYDRATE_RETRY_GAPS_MS.reduce((a, b) => a + b, 0);
     expect(JOURNAL_REHYDRATE_RETRY_GAPS_MS).toEqual([400, 500, 800]);
+    expect(RELATIVE_MEDIA_RETRY_GAPS_MS).toEqual([250, 700, 1500]);
     // Host POST_TURN_RECONCILE last delay is 750ms; disk write can trail it.
     expect(total).toBeGreaterThanOrEqual(1250);
   });
