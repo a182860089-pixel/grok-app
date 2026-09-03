@@ -159,4 +159,5 @@ export const ruChat = {
   "chat.longReplyShowFull": "Показать полный ответ",
   "chat.longReplyCollapse": "Показать только сокращённую версию",
   "chat.longReplyShowingFull": "Показан полный ответ",
+  "chat.toolOnlyNoReply": "В этом ходе Grok вызвал только инструменты и не вернул видимый ответ.",
 };

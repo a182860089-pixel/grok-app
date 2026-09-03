@@ -159,4 +159,5 @@ export const koChat = {
   "chat.longReplyShowFull": "전체 응답 보기",
   "chat.longReplyCollapse": "미리보기만 보기",
   "chat.longReplyShowingFull": "전체 응답을 표시 중",
+  "chat.toolOnlyNoReply": "Grok이 이번 턴에서 도구만 호출했고 보이는 답변을 반환하지 않았습니다.",
 };

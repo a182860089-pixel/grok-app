@@ -243,6 +243,12 @@
   outline: 1px solid currentColor;
   outline-offset: 2px;
 }
+.lobe-end-turn--tool-only .lobe-end-turn__title {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  font-style: italic;
+}
 
 /* Legacy class kept for any residual markers */
 .lobe-chat-tool {

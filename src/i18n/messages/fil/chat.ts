@@ -159,4 +159,5 @@ export const filChat = {
   "chat.longReplyShowFull": "Ipakita ang buong sagot",
   "chat.longReplyCollapse": "Ipakita lang ang preview",
   "chat.longReplyShowingFull": "Ipinapakita ang buong sagot",
+  "chat.toolOnlyNoReply": "Sa turn na ito, nag-call lang ng mga tool si Grok at walang nakikitang sagot.",
 };

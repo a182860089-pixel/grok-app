@@ -58,6 +58,10 @@ import {
   type ComposerPortalMenu,
 } from "@/components/ComposerPortalPop";
 import { FLOATING_MENU_Z_INDEX } from "@/lib/floatingMenu";
+import {
+  acquireNativeWebviewCover,
+  rectOverlapsNativeWebviewHost,
+} from "@/lib/nativeWebviewCover";
 
 type Pane = "simple" | "advanced";
 type HubFlyout = "models" | "effort" | "window";
@@ -610,10 +614,6 @@ export function ComposerModelMenu({
     window.clearTimeout(flyLeave.current);
     setHubFlyout(id);
   };
-  const hideFlyoutSoon = () => {
-    window.clearTimeout(flyLeave.current);
-    flyLeave.current = window.setTimeout(() => setHubFlyout(null), 140);
-  };
   const modelList = models.length > 0 ? models : GROK_BUILD_MODELS;
   const groups = buildComposerModelGroups({
     officialModels: modelList,
@@ -648,6 +648,60 @@ export function ComposerModelMenu({
   }, [modelMenu.open, modelMenu.exiting]);
 
   useEffect(() => () => window.clearTimeout(flyLeave.current), []);
+
+  /**
+   * The tertiary model list is portaled separately from the Advanced hub.
+   * Native Tauri child WebViews paint above DOM regardless of z-index, so a
+   * flyout that reaches the right resource pane would otherwise eat the
+   * pointer events before the model buttons receive them.
+   */
+  useLayoutEffect(() => {
+    if (
+      !hubFlyout ||
+      pane !== "advanced" ||
+      modelMenu.exiting ||
+      !flyPos
+    ) {
+      return;
+    }
+
+    let release: (() => void) | null = null;
+    const syncCover = () => {
+      const panel = flyoutRef.current;
+      if (!panel) return;
+      const r = panel.getBoundingClientRect();
+      const overlaps = rectOverlapsNativeWebviewHost({
+        left: r.left,
+        top: r.top,
+        right: r.right,
+        bottom: r.bottom,
+        width: r.width,
+        height: r.height,
+      });
+      if (overlaps && !release) {
+        release = acquireNativeWebviewCover();
+      } else if (!overlaps && release) {
+        release();
+        release = null;
+      }
+    };
+
+    syncCover();
+    const raf = requestAnimationFrame(syncCover);
+    const panel = flyoutRef.current;
+    const ro =
+      typeof ResizeObserver !== "undefined" && panel
+        ? new ResizeObserver(syncCover)
+        : null;
+    ro?.observe(panel as Element);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro?.disconnect();
+      release?.();
+      release = null;
+    };
+  }, [hubFlyout, pane, modelMenu.exiting, flyPos]);
 
   useLayoutEffect(() => {
     if (!modelMenu.open) return;
@@ -846,7 +900,6 @@ export function ComposerModelMenu({
           <div
             className="cmm__hub-body cmm__hub"
             aria-hidden={pane !== "advanced"}
-            onMouseLeave={hideFlyoutSoon}
           >
             <button
               ref={modelsRowRef}
@@ -958,7 +1011,6 @@ export function ComposerModelMenu({
               data-kind={hubFlyout}
               style={flyPos}
               onMouseEnter={() => hubFlyout && showFlyout(hubFlyout)}
-              onMouseLeave={hideFlyoutSoon}
             >
               {hubFlyout === "models" ? (
                 groups.length === 0 ? (

@@ -166,4 +166,5 @@ export const zhTWChat = {
   "chat.longReplyShowFull": "顯示全文",
   "chat.longReplyCollapse": "只顯示預覽",
   "chat.longReplyShowingFull": "正在顯示全文",
+  "chat.toolOnlyNoReply": "Grok 本輪只呼叫了工具，沒有返回可見回覆。",
 };

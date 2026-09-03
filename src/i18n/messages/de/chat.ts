@@ -159,4 +159,5 @@ export const deChat = {
   "chat.longReplyShowFull": "Vollständige Antwort zeigen",
   "chat.longReplyCollapse": "Nur Vorschau zeigen",
   "chat.longReplyShowingFull": "Vollständige Antwort wird angezeigt",
+  "chat.toolOnlyNoReply": "Grok hat in diesem Vorgang nur Werkzeuge aufgerufen und keine sichtbare Antwort gegeben.",
 };

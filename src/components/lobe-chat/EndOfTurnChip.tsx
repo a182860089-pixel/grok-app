@@ -98,3 +98,35 @@ export const EndOfTurnChip = memo(function EndOfTurnChip({
     </div>
   );
 });
+
+/** Tool-only turn: agent finished without a user-visible reply body. */
+export const ToolOnlyEmptyNotice = memo(function ToolOnlyEmptyNotice({
+  locale,
+  onContinue,
+  continueDisabled,
+}: {
+  locale: Locale;
+  onContinue?: () => void;
+  continueDisabled?: boolean;
+}) {
+  const tr = useMemo(() => createT(locale), [locale]);
+  return (
+    <div
+      className="lobe-end-turn lobe-end-turn--neutral lobe-end-turn--tool-only"
+      role="status"
+      data-testid="tool-only-empty"
+    >
+      <span className="lobe-end-turn__title">{tr("chat.toolOnlyNoReply")}</span>
+      {onContinue ? (
+        <button
+          type="button"
+          className="lobe-end-turn__continue"
+          disabled={continueDisabled}
+          onClick={onContinue}
+        >
+          {tr("endOfTurn.continue")}
+        </button>
+      ) : null}
+    </div>
+  );
+});

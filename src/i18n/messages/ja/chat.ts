@@ -159,4 +159,5 @@ export const jaChat = {
   "chat.longReplyShowFull": "全文を表示",
   "chat.longReplyCollapse": "プレビューだけ表示",
   "chat.longReplyShowingFull": "全文を表示中",
+  "chat.toolOnlyNoReply": "Grok はこのターンでツールだけを呼び出し、見える返信を返しませんでした。",
 };

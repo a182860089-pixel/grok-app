@@ -152,6 +152,33 @@ fn get_side_webview<R: tauri::Runtime>(
         .ok_or_else(|| format!("side browser webview not found: {label}"))
 }
 
+/// UA used by Rust-side HTTP downloads (reqwest has no Client Hints).
+/// The embedded WebView itself must NOT spoof a Chrome-only string — WebView2
+/// still sends `Sec-CH-UA: Microsoft Edge`, and that mismatch is exactly what
+/// trips Google's "unusual traffic" /sorry interstitial.
+pub(crate) fn side_browser_user_agent() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    }
+}
+
+fn side_browser_stealth_script() -> &'static str {
+    r#"(function(){
+  try {
+    Object.defineProperty(navigator, "webdriver", { get: function(){ return false; }, configurable: true });
+  } catch (e) {}
+})();"#
+}
+
 /// Sanitize a suggested download file name for the save dialog.
 fn sanitize_file_name(raw: &str) -> String {
     let trimmed = raw.trim();
@@ -176,27 +203,28 @@ fn sanitize_file_name(raw: &str) -> String {
     }
 }
 
-/// Prefer WK/WebView2 suggested path name; fall back to URL path segment.
+/// Prefer WK/WebView2 suggested path name; fall back to URL path / query.
+/// WebView2 often fills destination with `download.bin` when the server omitted
+/// Content-Disposition — treat that as missing so the URL can win.
 fn suggested_download_name(destination: &Path, url: &str) -> String {
-    if let Some(name) = destination
+    let dest_name = destination
         .file_name()
         .and_then(|n| n.to_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-    {
-        return sanitize_file_name(name);
-    }
-    if let Ok(u) = Url::parse(url) {
-        if let Some(seg) = u
-            .path_segments()
-            .and_then(|mut s| s.next_back())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
-            return sanitize_file_name(seg);
+        .map(sanitize_file_name);
+
+    if let Some(ref name) = dest_name {
+        if !crate::side_browser_blob::is_generic_download_name(name) {
+            return name.clone();
         }
     }
-    "download".into()
+    if let Some(from_url) = crate::side_browser_blob::filename_from_url_query(url) {
+        if !crate::side_browser_blob::is_generic_download_name(&from_url) {
+            return from_url;
+        }
+    }
+    dest_name.unwrap_or_else(|| "download".into())
 }
 
 /// Staging dir for in-progress side-browser downloads (`{app_data}/cache/side-browser-downloads`).
@@ -354,6 +382,11 @@ pub fn create(
     let builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(parsed))
         .accept_first_mouse(true)
         .focused(false)
+        // Keep the child on Wry's default WebView2 environment arguments.
+        // Supplying a different argument string creates a second environment
+        // against the same user-data folder and WebView2 rejects it with
+        // HRESULT 0x8007139F (the blank, non-interactive browser symptom).
+        .initialization_script(side_browser_stealth_script())
         .initialization_script(polyfill)
         // Drive UI loading bar + re-assert download polyfill after navigations.
         // Polyfill early-returns if already installed — cheap.
@@ -395,6 +428,21 @@ pub fn create(
                 DownloadEvent::Requested { url, destination } => {
                     let url_s = url.to_string();
                     let suggested = suggested_download_name(destination, &url_s);
+                    // Google sorry / recaptcha / html navigations. Accepting them
+                    // as files pops "Save file / download.bin" and blanks the frame.
+                    if crate::side_browser_blob::should_ignore_requested_download(
+                        &url_s,
+                        &suggested,
+                    ) {
+                        tracing::info!(
+                            target: "side_browser",
+                            %label,
+                            url = %url_s,
+                            %suggested,
+                            "download ignored at request (inline document)"
+                        );
+                        return false;
+                    }
                     // Accept immediately into a unique staging path. Modal save
                     // dialogs inside this callback frequently fail on macOS
                     // (WebKit download decision + nested NSSavePanel), which
@@ -511,6 +559,35 @@ pub fn create(
                             webview.app_handle(),
                             SideBrowserDownloadPayload {
                                 phase: "finished".into(),
+                                label,
+                                url: url_s,
+                                path: None,
+                                success: Some(false),
+                                file_name: Some(suggested),
+                            },
+                        );
+                        return true;
+                    }
+
+                    // Google sorry / recaptcha iframes are HTML documents. WebView2
+                    // still fires on_download as download.bin — do not steal focus
+                    // with a save dialog.
+                    if crate::side_browser_blob::should_ignore_finished_download(
+                        &url_s,
+                        &suggested,
+                        &staging_path,
+                    ) {
+                        let _ = std::fs::remove_file(&staging_path);
+                        tracing::info!(
+                            target: "side_browser",
+                            %label,
+                            url = %url_s,
+                            "download ignored (inline HTML, not a file)"
+                        );
+                        emit_download(
+                            webview.app_handle(),
+                            SideBrowserDownloadPayload {
+                                phase: "cancelled".into(),
                                 label,
                                 url: url_s,
                                 path: None,
@@ -809,6 +886,19 @@ mod tests {
         assert_eq!(
             suggested_download_name(&empty, "https://cdn.example.com/files/data.csv"),
             "data.csv"
+        );
+        // WebView2 generic destination must not hide a real URL filename.
+        let generic = PathBuf::from(r"C:\Users\x\Downloads\download.bin");
+        assert_eq!(
+            suggested_download_name(&generic, "https://cdn.example.com/files/invoice.pdf"),
+            "invoice.pdf"
+        );
+        assert_eq!(
+            suggested_download_name(
+                &generic,
+                "https://example.com/dl?filename=notes.txt"
+            ),
+            "notes.txt"
         );
     }
 

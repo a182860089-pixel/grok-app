@@ -44,6 +44,7 @@ import {
 import { MessageNodeRail } from "./MessageNodeRail";
 import { isEndOfTurnMarker } from "@/lib/endOfTurn";
 import { latestContinuableEndMessageId } from "@/lib/continueInterruptedTurn";
+import { turnHasNoVisibleReply } from "@/lib/turnActivity";
 import type { Attachment } from "@/lib/attachments";
 import {
   buildInlineMediaPathMap,
@@ -159,7 +160,7 @@ import {
   LiveToolText,
   pickRunningTurnTool,
 } from "./AgentActivity";
-import { EndOfTurnChip } from "./EndOfTurnChip";
+import { EndOfTurnChip, ToolOnlyEmptyNotice } from "./EndOfTurnChip";
 import {
   TimelineToolRow,
   TimelineToolGroup,
@@ -2573,6 +2574,8 @@ export function ConversationThread({
 
   const turnBusy =
     sessionState === "streaming" || sessionState === "awaiting_permission";
+  const showToolOnlyEmpty =
+    !turnBusy && turnHasNoVisibleReply(wovenMessages);
 
   /**
    * Live tool: only while a tool is running in this turn.
@@ -3176,6 +3179,14 @@ export function ConversationThread({
                 />
               ))
             : null}
+
+          {showToolOnlyEmpty ? (
+            <ToolOnlyEmptyNotice
+              locale={locale}
+              onContinue={onContinueInterrupted}
+              continueDisabled={turnBusy}
+            />
+          ) : null}
 
           {/* Tool before any assistant bubble — only if not already a message row. */}
           {showToolChrome && liveTool && !activeAssistantId && !liveToolHasRow ? (

@@ -159,4 +159,5 @@ export const taChat = {
   "chat.longReplyShowFull": "முழு பதிலைக் காட்டு",
   "chat.longReplyCollapse": "முன்னோட்டத்தை மட்டும் காட்டு",
   "chat.longReplyShowingFull": "முழு பதிலைக் காட்டுகிறது",
+  "chat.toolOnlyNoReply": "இந்த முறை Grok கருவிகளை மட்டும் அழைத்து, காணக்கூடிய பதிலைத் தரவில்லை.",
 };

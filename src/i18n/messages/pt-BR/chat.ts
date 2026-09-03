@@ -159,4 +159,5 @@ export const ptBRChat = {
   "chat.longReplyShowFull": "Mostrar resposta completa",
   "chat.longReplyCollapse": "Mostrar só a prévia",
   "chat.longReplyShowingFull": "Mostrando a resposta completa",
+  "chat.toolOnlyNoReply": "O Grok só chamou ferramentas neste turno e não devolveu uma resposta visível.",
 };

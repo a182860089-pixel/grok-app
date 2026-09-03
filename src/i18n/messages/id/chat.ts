@@ -159,4 +159,5 @@ export const idChat = {
   "chat.longReplyShowFull": "Tampilkan balasan penuh",
   "chat.longReplyCollapse": "Tampilkan pratinjau saja",
   "chat.longReplyShowingFull": "Menampilkan balasan penuh",
+  "chat.toolOnlyNoReply": "Grok hanya memanggil alat pada giliran ini dan tidak mengembalikan balasan yang terlihat.",
 };

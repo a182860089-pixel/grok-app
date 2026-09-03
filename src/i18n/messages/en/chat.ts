@@ -166,4 +166,5 @@ export const enChat = {
   "chat.longReplyShowFull": "Show full reply",
   "chat.longReplyCollapse": "Show preview only",
   "chat.longReplyShowingFull": "Showing the full reply",
+  "chat.toolOnlyNoReply": "Grok only called tools this turn and did not return a visible reply.",
 } as const;

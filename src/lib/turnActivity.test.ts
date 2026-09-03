@@ -3,6 +3,7 @@ import type { ChatMessage } from "./session";
 import {
   buildTurnActivity,
   groupActivitySegments,
+  turnHasNoVisibleReply,
   turnNeedsActivityNarrative,
   type TurnActivityTool,
 } from "./turnActivity";
@@ -121,5 +122,16 @@ describe("turnActivity", () => {
       content: "done",
     });
     expect(turnNeedsActivityNarrative(messages)).toBe(false);
+  });
+
+  it("turnHasNoVisibleReply ignores thought-only assistant rows", () => {
+    const messages: ChatMessage[] = [
+      { id: "u1", role: "user", content: "go" },
+      tool("a", { kind: "read_file", title: "read" }),
+      { id: "a1", role: "assistant", content: "", thought: "planning…" },
+    ];
+    expect(turnHasNoVisibleReply(messages)).toBe(true);
+    messages[2] = { id: "a1", role: "assistant", content: "done" };
+    expect(turnHasNoVisibleReply(messages)).toBe(false);
   });
 });

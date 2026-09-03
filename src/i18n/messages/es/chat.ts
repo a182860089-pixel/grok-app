@@ -159,4 +159,5 @@ export const esChat = {
   "chat.longReplyShowFull": "Mostrar respuesta completa",
   "chat.longReplyCollapse": "Mostrar solo la vista previa",
   "chat.longReplyShowingFull": "Mostrando la respuesta completa",
+  "chat.toolOnlyNoReply": "Grok solo llamó a herramientas en este turno y no devolvió una respuesta visible.",
 };

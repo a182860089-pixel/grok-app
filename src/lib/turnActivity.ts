@@ -272,3 +272,20 @@ export function turnNeedsActivityNarrative(
   }
   return true;
 }
+
+/**
+ * Tools ran this turn but the assistant never wrote a user-visible reply.
+ * Thinking-only (CoT) still counts as no visible reply.
+ */
+export function turnHasNoVisibleReply(messages: ChatMessage[]): boolean {
+  const activity = buildTurnActivity(messages);
+  if (activity.stepCount === 0) return false;
+  const lastUser = lastUserIndex(messages);
+  for (let i = lastUser + 1; i < messages.length; i++) {
+    const m = messages[i]!;
+    if (m.role === "assistant" && (m.content ?? "").trim()) {
+      return false;
+    }
+  }
+  return true;
+}

@@ -159,4 +159,5 @@ export const ukChat = {
   "chat.longReplyShowFull": "Показати повну відповідь",
   "chat.longReplyCollapse": "Лише попередній перегляд",
   "chat.longReplyShowingFull": "Показано повну відповідь",
+  "chat.toolOnlyNoReply": "Цього ходу Grok лише викликав інструменти і не повернув видимої відповіді.",
 };
