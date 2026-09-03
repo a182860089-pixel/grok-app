@@ -21,7 +21,7 @@ function dt(partial: {
   return {
     types: partial.types ?? [],
     files: files as FileList,
-    items: partial.items as DataTransferItemList,
+    items: partial.items as unknown as DataTransferItemList,
     getData: partial.getData ?? (() => ""),
   } as unknown as DataTransfer;
 }
