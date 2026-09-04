@@ -28,6 +28,7 @@ pub const SNAPSHOT_JS: &str = r#"(function(){
     if (tag === 'button' || tag === 'summary') return 'button';
     if (tag === 'select') return 'combobox';
     if (tag === 'textarea' || el.isContentEditable) return 'textbox';
+    if (tag === 'iframe') return 'iframe';
     if (tag === 'img') return 'image';
     if (/^h[1-6]$/.test(tag)) return 'heading';
     if (tag === 'input') {
@@ -44,6 +45,9 @@ pub const SNAPSHOT_JS: &str = r#"(function(){
     var acc = (el.getAttribute('aria-label') || '').trim();
     if (acc) return acc.slice(0, 120);
     if (el.tagName === 'IMG') return (el.getAttribute('alt') || '').trim().slice(0, 120);
+    if (el.tagName === 'IFRAME') {
+      return (el.getAttribute('title') || el.getAttribute('name') || el.getAttribute('src') || 'iframe').trim().slice(0, 120);
+    }
     if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
       var lab = (el.getAttribute('placeholder') || el.getAttribute('name') || el.getAttribute('title') || '').trim();
       if (!lab && el.id) {
@@ -55,7 +59,7 @@ pub const SNAPSHOT_JS: &str = r#"(function(){
     var t = ((el.innerText || el.textContent || '') + '').replace(/\s+/g, ' ').trim();
     return t.slice(0, 120);
   }
-  var INTERACTIVE = 'a[href], button, input, select, textarea, summary, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="textbox"], [role="combobox"], [role="switch"], [role="slider"], [contenteditable="true"]';
+  var INTERACTIVE = 'a[href], button, input, select, textarea, iframe, summary, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="textbox"], [role="combobox"], [role="switch"], [role="slider"], [contenteditable="true"]';
   var CONTEXT = 'h1, h2, h3, h4, h5, h6, img[alt], [role="heading"]';
   var lines = [];
   lines.push('- document [url=' + JSON.stringify(location.href || '') + '] [title=' + JSON.stringify(document.title || '') + '] [ready=' + (document.readyState || '') + ']');
@@ -115,6 +119,11 @@ pub fn click_js(r#ref: &str) -> String {
   var el = document.querySelector('[data-grok-ref=' + JSON.stringify(ref) + ']');
   if (!el) return JSON.stringify({{ok:false, error:'ref not found: ' + ref + '. Call browser_snapshot first.'}});
   try {{ el.scrollIntoView({{block:'center', inline:'nearest'}}); }} catch (e) {{}}
+  if (String(el.tagName || '').toUpperCase() === 'IFRAME') {{
+    var frameBox = el.getBoundingClientRect();
+    try {{ el.focus(); }} catch (e) {{}}
+    return JSON.stringify({{ok:true, ref:ref, tag:'IFRAME', native:true, left:frameBox.left, top:frameBox.top, width:frameBox.width, height:frameBox.height}});
+  }}
   try {{ el.focus(); }} catch (e) {{}}
   var box = el.getBoundingClientRect();
   var x = box.left + Math.max(1, box.width / 2);
@@ -134,6 +143,47 @@ pub fn click_js(r#ref: &str) -> String {
     )
 }
 
+pub fn focus_frame_js(selector: Option<&str>) -> String {
+    let selector = selector.map(js_str).unwrap_or_else(|| "null".into());
+    format!(
+        r#"(function(){{
+  var selector = {selector};
+  var el = null;
+  try {{
+    if (selector) {{
+      el = document.querySelector(selector);
+    }} else {{
+      var frames = Array.prototype.slice.call(document.querySelectorAll('iframe'));
+      el = frames.find(function(x){{
+        var r = x.getBoundingClientRect();
+        var s = getComputedStyle(x);
+        return s.display !== 'none' && s.visibility !== 'hidden' && r.width >= 2 && r.height >= 2;
+      }}) || null;
+    }}
+  }} catch (e) {{
+    return JSON.stringify({{ok:false, error:String(e)}});
+  }}
+  if (!el || String(el.tagName || '').toUpperCase() !== 'IFRAME') {{
+    return JSON.stringify({{ok:false, error:'iframe not found'}});
+  }}
+  try {{ el.scrollIntoView({{block:'center', inline:'nearest'}}); }} catch (e) {{}}
+  try {{ el.focus(); }} catch (e) {{}}
+  var r = el.getBoundingClientRect();
+  return JSON.stringify({{
+    ok:true,
+    tag:'IFRAME',
+    title:el.getAttribute('title') || '',
+    name:el.getAttribute('name') || '',
+    src:el.getAttribute('src') || '',
+    left:r.left,
+    top:r.top,
+    width:r.width,
+    height:r.height
+  }});
+}})()"#
+    )
+}
+
 pub fn type_js(r#ref: &str, text: &str, submit: bool) -> String {
     let r = js_str(r#ref);
     let t = js_str(text);
@@ -145,6 +195,10 @@ pub fn type_js(r#ref: &str, text: &str, submit: bool) -> String {
   var el = document.querySelector('[data-grok-ref=' + JSON.stringify(ref) + ']');
   if (!el) return JSON.stringify({{ok:false, error:'ref not found: ' + ref + '. Call browser_snapshot first.'}});
   try {{ el.scrollIntoView({{block:'center', inline:'nearest'}}); }} catch (e) {{}}
+  if (String(el.tagName || '').toUpperCase() === 'IFRAME') {{
+    try {{ el.focus(); }} catch (e) {{}}
+    return JSON.stringify({{ok:true, ref:ref, native:true, submit:submit, textLength:text.length}});
+  }}
   try {{ el.focus(); }} catch (e) {{}}
   function setVal(node, value) {{
     if (node.isContentEditable) {{
@@ -219,6 +273,7 @@ pub fn select_js(r#ref: &str, value: &str) -> String {
     )
 }
 
+#[allow(dead_code)]
 pub fn press_js(key: &str) -> String {
     let k = js_str(key);
     format!(
@@ -300,8 +355,10 @@ mod tests {
         let typed = type_js("e3", "hello \"world\"", true);
         assert!(typed.contains("e3"));
         assert!(typed.contains("hello"));
+        assert!(typed.contains("native"));
         assert!(select_js("e1", "cn").contains("SELECT"));
         assert!(press_js("Enter").contains("Enter"));
+        assert!(focus_frame_js(Some("iframe")).contains("querySelector"));
         assert!(scroll_js(None, "down", 400).contains("window.scrollBy"));
         assert!(contains_text_js("登录").contains("登录"));
     }

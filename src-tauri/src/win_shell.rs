@@ -26,7 +26,9 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_SERVER, COINIT_APARTMENTTHREADED,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, GetFocus, SetFocus, VK_LBUTTON,
+    mouse_event, GetAsyncKeyState, GetFocus, SendInput, SetFocus, INPUT, INPUT_0, INPUT_KEYBOARD,
+    KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    VIRTUAL_KEY, VK_LBUTTON,
 };
 use windows::Win32::UI::Shell::{
     ExtractIconExW, ITaskbarList, SetCurrentProcessExplicitAppUserModelID, TaskbarList,
@@ -36,9 +38,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongW, IsChild, IsWindowVisible, RemovePropW, SendMessageW, SetClassLongPtrW, SetMenu,
     SetPropW, SetWindowLongPtrW, SetWindowLongW, SetWindowPos, GCLP_HICON, GCLP_HICONSM,
     GWLP_HWNDPARENT, GWLP_WNDPROC, GWL_EXSTYLE, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, GW_OWNER, HICON,
-    HWND_NOTOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
-    WA_ACTIVE, WA_CLICKACTIVE, WM_ACTIVATE, WM_NCDESTROY, WM_SETFOCUS, WM_SETICON, WNDPROC,
-    WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+    HWND_NOTOPMOST, SetCursorPos, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+    SWP_NOZORDER, WA_ACTIVE, WA_CLICKACTIVE, WM_ACTIVATE, WM_NCDESTROY, WM_SETFOCUS, WM_SETICON,
+    WNDPROC, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
 };
 
 /// Call once early in process startup (before or right after creating the main window).
@@ -61,6 +63,166 @@ pub fn set_process_app_user_model_id(id: &str) {
 /// so the host must notice the button release itself.
 pub fn primary_mouse_button_down() -> bool {
     unsafe { GetAsyncKeyState(i32::from(VK_LBUTTON.0)) < 0 }
+}
+
+/// Move the real pointer and click a point inside the native child WebView.
+/// This is used only after the page has returned a concrete iframe rectangle;
+/// it gives cross-origin hosted fields the same user-gesture path as a manual
+/// click without reading the iframe contents.
+pub fn click_screen_point(x: i32, y: i32) -> Result<(), String> {
+    unsafe {
+        SetCursorPos(x, y).map_err(|e| format!("SetCursorPos: {e}"))?;
+        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+    }
+    Ok(())
+}
+
+fn send_inputs(inputs: &[INPUT]) -> Result<(), String> {
+    let sent = unsafe { SendInput(inputs, std::mem::size_of::<INPUT>() as i32) };
+    if sent == inputs.len() as u32 {
+        Ok(())
+    } else {
+        Err(format!("SendInput sent {sent}/{}", inputs.len()))
+    }
+}
+
+/// Send text through the OS input queue so Chromium/WebView2 forwards it into
+/// the currently focused document, including a cross-origin iframe.
+pub fn send_unicode_text(text: &str) -> Result<(), String> {
+    let mut inputs = Vec::with_capacity(text.encode_utf16().count() * 2);
+    for unit in text.encode_utf16() {
+        let down = KEYBDINPUT {
+            wVk: VIRTUAL_KEY(0),
+            wScan: unit,
+            dwFlags: KEYEVENTF_UNICODE,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+        let up = KEYBDINPUT {
+            dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+            ..down
+        };
+        inputs.push(INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 { ki: down },
+        });
+        inputs.push(INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 { ki: up },
+        });
+    }
+    if inputs.is_empty() {
+        return Ok(());
+    }
+    send_inputs(&inputs)
+}
+
+fn virtual_key_for_name(key: &str) -> Option<u16> {
+    match key.trim().to_ascii_lowercase().as_str() {
+        "tab" => Some(0x09),
+        "enter" | "return" => Some(0x0D),
+        "escape" | "esc" => Some(0x1B),
+        "backspace" => Some(0x08),
+        "delete" | "del" => Some(0x2E),
+        "arrowup" | "up" => Some(0x26),
+        "arrowdown" | "down" => Some(0x28),
+        "arrowleft" | "left" => Some(0x25),
+        "arrowright" | "right" => Some(0x27),
+        "home" => Some(0x24),
+        "end" => Some(0x23),
+        "pageup" => Some(0x21),
+        "pagedown" => Some(0x22),
+        "space" => Some(0x20),
+        "f1" => Some(0x70),
+        "f2" => Some(0x71),
+        "f3" => Some(0x72),
+        "f4" => Some(0x73),
+        "f5" => Some(0x74),
+        "f6" => Some(0x75),
+        "f7" => Some(0x76),
+        "f8" => Some(0x77),
+        "f9" => Some(0x78),
+        "f10" => Some(0x79),
+        "f11" => Some(0x7A),
+        "f12" => Some(0x7B),
+        _ => None,
+    }
+}
+
+/// Send one named key (or a single printable character) as a real keyboard
+/// input. Supports common Ctrl/Alt/Shift/Meta combinations.
+pub fn send_key(key: &str) -> Result<(), String> {
+    let raw = key.trim();
+    if raw.is_empty() {
+        return Ok(());
+    }
+    if !raw.contains('+') && raw.chars().count() == 1 {
+        return send_unicode_text(raw);
+    }
+
+    let parts: Vec<&str> = raw.split('+').map(str::trim).collect();
+    let mut inputs = Vec::new();
+    let mut modifiers = Vec::new();
+    for part in parts.iter().take(parts.len().saturating_sub(1)) {
+        let vk = match part.to_ascii_lowercase().as_str() {
+            "ctrl" | "control" => 0x11,
+            "alt" => 0x12,
+            "shift" => 0x10,
+            "meta" | "win" | "cmd" => 0x5B,
+            _ => continue,
+        };
+        modifiers.push(vk);
+        inputs.push(INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(vk),
+                    ..Default::default()
+                },
+            },
+        });
+    }
+    let last = parts.last().copied().unwrap_or(raw);
+    if let Some(vk) = virtual_key_for_name(last) {
+        inputs.push(INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(vk),
+                    ..Default::default()
+                },
+            },
+        });
+        inputs.push(INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(vk),
+                    dwFlags: KEYEVENTF_KEYUP,
+                    ..Default::default()
+                },
+            },
+        });
+    } else {
+        send_unicode_text(last)?;
+    }
+    for vk in modifiers.into_iter().rev() {
+        inputs.push(INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(vk),
+                    dwFlags: KEYEVENTF_KEYUP,
+                    ..Default::default()
+                },
+            },
+        });
+    }
+    if inputs.is_empty() {
+        return Err(format!("unsupported key: {raw}"));
+    }
+    send_inputs(&inputs)
 }
 
 /// Desktop-pet overlay: drop the Win32 menu bar (File / Edit / Window / Help).

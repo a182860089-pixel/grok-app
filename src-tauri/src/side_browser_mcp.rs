@@ -429,7 +429,7 @@ fn tools_schema() -> Value {
                 }
             })),
         tool("browser_click",
-            "Click an element by snapshot ref (e.g. e12). Always snapshot first.",
+            "Click an element by snapshot ref (e.g. e12). Iframe refs use a real native click so hosted fields receive focus.",
             json!({
                 "type":"object",
                 "properties":{
@@ -476,11 +476,30 @@ fn tools_schema() -> Value {
                 "required":["ref","value"]
             })),
         tool("browser_press",
-            "Press a key in the focused embedded page (Enter, Tab, Escape, ArrowDown, …).",
+            "Press a real key in the focused embedded page (Enter, Tab, Escape, ArrowDown, …), including cross-origin iframe inputs.",
             json!({
                 "type":"object",
                 "properties":{"key":{"type":"string"},"tab":{"type":"string"}},
                 "required":["key"]
+            })),
+        tool("browser_focus_frame",
+            "Focus and click a cross-origin iframe using its parent-page selector. Use this before browser_type_focused for hosted payment or auth fields.",
+            json!({
+                "type":"object",
+                "properties":{
+                    "selector":{"type":"string","description":"Optional CSS selector such as iframe[title*=\"card number\"]"},
+                    "tab":{"type":"string"}
+                }
+            })),
+        tool("browser_type_focused",
+            "Type text through the real OS keyboard into the currently focused embedded page or iframe. The text is never read back.",
+            json!({
+                "type":"object",
+                "properties":{
+                    "text":{"type":"string"},
+                    "tab":{"type":"string"}
+                },
+                "required":["text"]
             })),
         tool("browser_scroll",
             "Scroll the page or a snapshot ref. direction: up|down|left|right.",
@@ -553,7 +572,13 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Result<String, 
         "browser_click" => {
             let r = req_str(args, "ref")?;
             let label = ensure_label(app, tab, None).await?;
-            eval_json(app, &label, side_browser_a11y::click_js(&r)).await
+            let raw = eval_json(app, &label, side_browser_a11y::click_js(&r)).await?;
+            if let Ok(v) = serde_json::from_str::<Value>(&raw) {
+                if v.get("native").and_then(|b| b.as_bool()) == Some(true) {
+                    return focus_frame_by_ref(app, &label, &r).await;
+                }
+            }
+            Ok(raw)
         }
         "browser_type" => {
             let r = req_str(args, "ref")?;
@@ -563,7 +588,13 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Result<String, 
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             let label = ensure_label(app, tab, None).await?;
-            eval_json(app, &label, side_browser_a11y::type_js(&r, &text, submit)).await
+            let raw = eval_json(app, &label, side_browser_a11y::type_js(&r, &text, submit)).await?;
+            if let Ok(v) = serde_json::from_str::<Value>(&raw) {
+                if v.get("native").and_then(|b| b.as_bool()) == Some(true) {
+                    return type_frame_by_ref(app, &label, &r, &text, submit, false).await;
+                }
+            }
+            Ok(raw)
         }
         "browser_fill" => {
             let r = req_str(args, "ref")?;
@@ -573,7 +604,13 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Result<String, 
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             let label = ensure_label(app, tab, None).await?;
-            eval_json(app, &label, side_browser_a11y::type_js(&r, value, false)).await
+            let raw = eval_json(app, &label, side_browser_a11y::type_js(&r, value, false)).await?;
+            if let Ok(v) = serde_json::from_str::<Value>(&raw) {
+                if v.get("native").and_then(|b| b.as_bool()) == Some(true) {
+                    return type_frame_by_ref(app, &label, &r, value, false, true).await;
+                }
+            }
+            Ok(raw)
         }
         "browser_hover" => {
             let r = req_str(args, "ref")?;
@@ -589,7 +626,40 @@ async fn call_tool(app: &AppHandle, name: &str, args: &Value) -> Result<String, 
         "browser_press" => {
             let key = req_str(args, "key")?;
             let label = ensure_label(app, tab, None).await?;
-            eval_json(app, &label, side_browser_a11y::press_js(&key)).await
+            let app2 = app.clone();
+            let lab = label.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                side_browser_host::send_key(&app2, lab, key)
+            })
+            .await
+            .map_err(|e| format!("{EVAL_JOIN}: {e}"))?
+        }
+        "browser_focus_frame" => {
+            let selector = args
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let label = ensure_label(app, tab, None).await?;
+            let app2 = app.clone();
+            let lab = label.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                side_browser_host::focus_frame(&app2, lab, selector)
+            })
+            .await
+            .map_err(|e| format!("{EVAL_JOIN}: {e}"))?
+        }
+        "browser_type_focused" => {
+            let text = req_str(args, "text")?;
+            let label = ensure_label(app, tab, None).await?;
+            let app2 = app.clone();
+            let lab = label.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                side_browser_host::send_text(&app2, lab, text)
+            })
+            .await
+            .map_err(|e| format!("{EVAL_JOIN}: {e}"))?
         }
         "browser_scroll" => {
             let direction = args
@@ -703,8 +773,15 @@ async fn snapshot(app: &AppHandle, label: &str) -> Result<String, String> {
 }
 
 async fn wait_tool(app: &AppHandle, tab: Option<&str>, args: &Value) -> Result<String, String> {
-    let time_ms = args.get("time_ms").or_else(|| args.get("timeMs")).and_then(|v| v.as_u64());
-    let text = args.get("text").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
+    let time_ms = args
+        .get("time_ms")
+        .or_else(|| args.get("timeMs"))
+        .and_then(|v| v.as_u64());
+    let text = args
+        .get("text")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let load = args.get("load").and_then(|v| v.as_bool()).unwrap_or(false);
     if let Some(ms) = time_ms {
         tokio::time::sleep(Duration::from_millis(ms.min(15_000))).await;
@@ -813,12 +890,80 @@ async fn eval_json(app: &AppHandle, label: &str, script: String) -> Result<Strin
 async fn eval_raw(app: &AppHandle, label: &str, script: String) -> Result<String, String> {
     let app2 = app.clone();
     let lab = label.to_string();
-    let raw = tauri::async_runtime::spawn_blocking(move || {
-        side_browser_host::eval(&app2, lab, script)
+    let raw =
+        tauri::async_runtime::spawn_blocking(move || side_browser_host::eval(&app2, lab, script))
+            .await
+            .map_err(|e| format!("{EVAL_JOIN}: {e}"))??;
+    Ok(side_browser_host::decode_eval_result(&raw))
+}
+
+fn iframe_ref_selector(r#ref: &str) -> String {
+    format!(
+        "iframe[data-grok-ref={}]",
+        serde_json::to_string(r#ref).unwrap_or_else(|_| "\"\"".into())
+    )
+}
+
+async fn focus_frame_by_ref(
+    app: &AppHandle,
+    label: &str,
+    r#ref: &str,
+) -> Result<String, String> {
+    let selector = iframe_ref_selector(r#ref);
+    let app2 = app.clone();
+    let lab = label.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        side_browser_host::focus_frame(&app2, lab, Some(selector))
+    })
+    .await
+    .map_err(|e| format!("{EVAL_JOIN}: {e}"))?
+}
+
+async fn type_frame_by_ref(
+    app: &AppHandle,
+    label: &str,
+    r#ref: &str,
+    text: &str,
+    submit: bool,
+    replace: bool,
+) -> Result<String, String> {
+    let focused = focus_frame_by_ref(app, label, r#ref).await?;
+    if replace {
+        let app2 = app.clone();
+        let lab = label.to_string();
+        tauri::async_runtime::spawn_blocking(move || {
+            side_browser_host::send_key(&app2, lab, "Ctrl+A".into())
+        })
+        .await
+        .map_err(|e| format!("{EVAL_JOIN}: {e}"))??;
+    }
+    let app2 = app.clone();
+    let lab = label.to_string();
+    let content = text.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        side_browser_host::send_text(&app2, lab, content)
     })
     .await
     .map_err(|e| format!("{EVAL_JOIN}: {e}"))??;
-    Ok(side_browser_host::decode_eval_result(&raw))
+    if submit {
+        let app3 = app.clone();
+        let lab = label.to_string();
+        tauri::async_runtime::spawn_blocking(move || {
+            side_browser_host::send_key(&app3, lab, "Enter".into())
+        })
+        .await
+        .map_err(|e| format!("{EVAL_JOIN}: {e}"))??;
+    }
+    Ok(json!({
+        "ok": true,
+        "native": true,
+        "ref": r#ref,
+        "textLength": text.chars().count(),
+        "submit": submit,
+        "replace": replace,
+        "focus": focused
+    })
+    .to_string())
 }
 
 async fn current_url(app: &AppHandle, label: &str) -> Result<String, String> {
@@ -848,6 +993,8 @@ mod tests {
         assert!(names.contains(&"browser_click"));
         assert!(names.contains(&"browser_navigate"));
         assert!(names.contains(&"browser_type"));
+        assert!(names.contains(&"browser_focus_frame"));
+        assert!(names.contains(&"browser_type_focused"));
         let _ = init;
         let err = rpc_err(json!(2), -32601, "Method not found: foo");
         assert_eq!(err["error"]["code"], -32601);
@@ -872,7 +1019,10 @@ mod tests {
     #[test]
     fn token_header_accepts_bearer() {
         let mut h = HeaderMap::new();
-        h.insert(header::AUTHORIZATION, "Bearer secret-token".parse().unwrap());
+        h.insert(
+            header::AUTHORIZATION,
+            "Bearer secret-token".parse().unwrap(),
+        );
         assert!(token_ok("secret-token", &h));
         assert!(!token_ok("other", &h));
         let mut h2 = HeaderMap::new();

@@ -42,8 +42,7 @@ const DOWNLOAD_EVENT: &str = "side-browser://download";
 const PAGE_LOAD_EVENT: &str = "side-browser://page-load";
 
 /// Last Browser panel the user (or Agent open) focused. MCP tools default here.
-static FOCUSED_LABEL: LazyLock<Mutex<Option<String>>> =
-    LazyLock::new(|| Mutex::new(None));
+static FOCUSED_LABEL: LazyLock<Mutex<Option<String>>> = LazyLock::new(|| Mutex::new(None));
 
 /// url → staging path chosen in `Requested` (macOS finish omits path).
 static PENDING_DOWNLOADS: LazyLock<Mutex<HashMap<String, PendingDownload>>> =
@@ -431,8 +430,7 @@ pub fn create(
                     // Google sorry / recaptcha / html navigations. Accepting them
                     // as files pops "Save file / download.bin" and blanks the frame.
                     if crate::side_browser_blob::should_ignore_requested_download(
-                        &url_s,
-                        &suggested,
+                        &url_s, &suggested,
                     ) {
                         tracing::info!(
                             target: "side_browser",
@@ -725,6 +723,116 @@ pub fn set_focus(label: String) -> Result<(), String> {
     Ok(())
 }
 
+fn json_number(v: &serde_json::Value, key: &str) -> Result<f64, String> {
+    v.get(key)
+        .and_then(|n| n.as_f64())
+        .filter(|n| n.is_finite())
+        .ok_or_else(|| format!("frame response missing {key}"))
+}
+
+/// Focus and click a top-level iframe using the real WebView input path.
+/// The iframe document is never inspected; only its parent-page rectangle is
+/// used to reproduce a normal user click for hosted fields.
+pub fn focus_frame(
+    app: &AppHandle,
+    label: String,
+    selector: Option<String>,
+) -> Result<String, String> {
+    validate_side_label(&label)?;
+    let script = crate::side_browser_a11y::focus_frame_js(selector.as_deref());
+    let raw = decode_eval_result(&eval(app, label.clone(), script)?);
+    let payload: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("focus frame response: {e}"))?;
+    if payload.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        return Err(payload
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("iframe focus failed")
+            .to_string());
+    }
+
+    let wv = get_side_webview(app, &label)?;
+    wv.window()
+        .set_focus()
+        .map_err(|e| format!("focus browser window: {e}"))?;
+    wv.set_focus()
+        .map_err(|e| format!("focus browser webview: {e}"))?;
+
+    #[cfg(windows)]
+    {
+        let left = json_number(&payload, "left")?;
+        let top = json_number(&payload, "top")?;
+        let width = json_number(&payload, "width")?;
+        let height = json_number(&payload, "height")?;
+        let child = wv
+            .position()
+            .map_err(|e| format!("iframe child position: {e}"))?;
+        let origin = wv
+            .window()
+            .inner_position()
+            .map_err(|e| format!("browser window position: {e}"))?;
+        let scale = wv
+            .window()
+            .scale_factor()
+            .map_err(|e| format!("browser scale factor: {e}"))?;
+        let x = origin.x + child.x + ((left + width / 2.0) * scale).round() as i32;
+        let y = origin.y + child.y + ((top + height / 2.0) * scale).round() as i32;
+        crate::win_shell::click_screen_point(x, y)?;
+    }
+
+    Ok(raw)
+}
+
+/// Dispatch real OS keyboard input to the focused embedded WebView. Unlike a
+/// synthetic KeyboardEvent, this reaches cross-origin hosted inputs such as
+/// Stripe Elements.
+pub fn send_key(app: &AppHandle, label: String, key: String) -> Result<String, String> {
+    validate_side_label(&label)?;
+    let wv = get_side_webview(app, &label)?;
+    wv.window()
+        .set_focus()
+        .map_err(|e| format!("focus browser window: {e}"))?;
+    wv.set_focus()
+        .map_err(|e| format!("focus browser webview: {e}"))?;
+    #[cfg(windows)]
+    {
+        crate::win_shell::send_key(&key)?;
+        return Ok(format!("native key dispatched: {}", key.trim()));
+    }
+    #[cfg(not(windows))]
+    {
+        let raw = decode_eval_result(&eval(
+            app,
+            label,
+            crate::side_browser_a11y::press_js(&key),
+        )?);
+        Ok(raw)
+    }
+}
+
+pub fn send_text(app: &AppHandle, label: String, text: String) -> Result<String, String> {
+    validate_side_label(&label)?;
+    let wv = get_side_webview(app, &label)?;
+    wv.window()
+        .set_focus()
+        .map_err(|e| format!("focus browser window: {e}"))?;
+    wv.set_focus()
+        .map_err(|e| format!("focus browser webview: {e}"))?;
+    #[cfg(windows)]
+    {
+        crate::win_shell::send_unicode_text(&text)?;
+        return Ok(format!(
+            "native text dispatched: {} UTF-16 units",
+            text.encode_utf16().count()
+        ));
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = text;
+        Err("native keyboard dispatch is only implemented on Windows".into())
+    }
+}
+
 pub fn focused_label() -> Option<String> {
     FOCUSED_LABEL.lock().clone()
 }
@@ -850,10 +958,7 @@ mod tests {
 
     #[test]
     fn decode_eval_unwraps_json_string() {
-        assert_eq!(
-            decode_eval_result("\"{\\\"ok\\\":true}\""),
-            "{\"ok\":true}"
-        );
+        assert_eq!(decode_eval_result("\"{\\\"ok\\\":true}\""), "{\"ok\":true}");
         assert_eq!(decode_eval_result("{\"ok\":true}"), "{\"ok\":true}");
         assert_eq!(decode_eval_result("null"), "");
     }
@@ -894,10 +999,7 @@ mod tests {
             "invoice.pdf"
         );
         assert_eq!(
-            suggested_download_name(
-                &generic,
-                "https://example.com/dl?filename=notes.txt"
-            ),
+            suggested_download_name(&generic, "https://example.com/dl?filename=notes.txt"),
             "notes.txt"
         );
     }
