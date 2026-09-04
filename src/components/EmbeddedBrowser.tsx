@@ -15,10 +15,10 @@
  * - Create once per label; URL changes use `side_browser_navigate` (not recreate).
  * - Reload uses `side_browser_reload` (full document refresh without tear-down).
  * - Pane hide/show only toggles visibility; bounds re-apply only when the host
- *   rect actually moves (avoids open/close blocking on setPosition/setSize).
+ *   rect actually moves (avoids open/close blocking on bounds IPC).
  *
  * Bounds: host ResizeObserver + ancestor observers + window resize, coalesced
- * through a trailing single-flight so setPosition/setSize never interleave
+ * through a trailing single-flight so bounds updates never interleave
  * (sidebar drag used to jitter / leave a white gap).
  *
  * Non-Tauri (dev UI only): falls back to iframe + open-external affordance.
@@ -33,6 +33,7 @@ import {
   sideBrowserInstallDownloadHook,
   sideBrowserNavigate,
   sideBrowserReload,
+  sideBrowserSetBounds,
 } from "@/lib/api";
 import type {
   SideBrowserDownloadEvent,
@@ -176,17 +177,6 @@ async function withTimeout<T>(
 
 /** How many parent elements to observe so pane/splitter moves re-sync position. */
 const ANCESTOR_OBSERVE_DEPTH = 6;
-
-type DpiMod = typeof import("@tauri-apps/api/dpi");
-
-let dpiModPromise: Promise<DpiMod> | null = null;
-
-function loadDpi(): Promise<DpiMod> {
-  if (!dpiModPromise) {
-    dpiModPromise = import("@tauri-apps/api/dpi");
-  }
-  return dpiModPromise;
-}
 
 export interface EmbeddedBrowserProps {
   url: string;
@@ -456,12 +446,12 @@ export function EmbeddedBrowser({
     }
 
     try {
-      const { LogicalPosition, LogicalSize } = await loadDpi();
-      // Position then size — one pair per apply; single-flight prevents interleave.
+      // One atomic bounds update per apply; single-flight prevents interleave.
       // When hidden (pane closed), still update bounds so the next show is correct
       // without a second full apply — but skip show/hide thrash via lastVisibleRef.
-      await wv.setPosition(new LogicalPosition(next.x, next.y));
-      await wv.setSize(new LogicalSize(next.width, next.height));
+      // Keep position and size in one host dispatch. Two independent IPC
+      // calls can cross during a drag and briefly expose stale hit regions.
+      await sideBrowserSetBounds(webviewLabel, next);
       lastBoundsRef.current = next;
       await setWebviewVisible(wv, wantShow);
     } catch (e) {
@@ -610,11 +600,8 @@ export function EmbeddedBrowser({
       setReady(false);
       markPageLoading(true);
       try {
-        // Warm dpi module before create so first drag frames don't pay import cost.
-        void loadDpi();
         const { Webview } = await import("@tauri-apps/api/webview");
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
-        const { LogicalPosition, LogicalSize } = await loadDpi();
         const win = getCurrentWindow();
 
         // Do not close before create. The host reuses a live label, which avoids
@@ -665,8 +652,7 @@ export function EmbeddedBrowser({
         webviewRef.current = webview;
         currentUrlRef.current = target;
         lastBoundsRef.current = { x, y, width: w, height: h };
-        await webview.setPosition(new LogicalPosition(x, y));
-        await webview.setSize(new LogicalSize(w, h));
+        await sideBrowserSetBounds(webviewLabel, { x, y, width: w, height: h });
         // Show as soon as the child exists — do not wait on pageLoading
         // (that path caused navigate-time hide/show flicker).
         const wantShow = activeRef.current && !coveredRef.current;
@@ -855,7 +841,7 @@ export function EmbeddedBrowser({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reloadKey, ready, webviewLabel]);
 
-  // Visibility only — do NOT null bounds (avoids open/close setPosition thrash).
+  // Visibility only — do NOT null bounds (avoids open/close bounds thrash).
   useEffect(() => {
     const wv = webviewRef.current;
     if (!wv || !isTauri()) return;

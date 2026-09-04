@@ -35,12 +35,13 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, DrawMenuBar, GetClassNameW, GetPropW, GetWindow, GetWindowLongPtrW,
-    GetWindowLongW, IsChild, IsWindowVisible, RemovePropW, SendMessageW, SetClassLongPtrW, SetMenu,
-    SetPropW, SetWindowLongPtrW, SetWindowLongW, SetWindowPos, GCLP_HICON, GCLP_HICONSM,
-    GWLP_HWNDPARENT, GWLP_WNDPROC, GWL_EXSTYLE, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, GW_OWNER, HICON,
-    HWND_NOTOPMOST, SetCursorPos, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SWP_NOZORDER, WA_ACTIVE, WA_CLICKACTIVE, WM_ACTIVATE, WM_NCDESTROY, WM_SETFOCUS, WM_SETICON,
-    WNDPROC, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+    GetWindowLongW, IsChild, IsWindow, IsWindowVisible, PostMessageW, RemovePropW, SendMessageW,
+    SetClassLongPtrW, SetMenu, SetPropW, SetWindowLongPtrW, SetWindowLongW, SetWindowPos,
+    GCLP_HICON, GCLP_HICONSM, GWLP_HWNDPARENT, GWLP_WNDPROC, GWL_EXSTYLE, GWL_STYLE, GW_CHILD,
+    GW_HWNDNEXT, GW_OWNER, HICON, HWND_NOTOPMOST, SetCursorPos, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WA_ACTIVE, WA_CLICKACTIVE, WM_ACTIVATE, WM_APP,
+    WM_NCDESTROY, WM_SETFOCUS, WM_SETICON, WNDPROC, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
 };
 
 /// Call once early in process startup (before or right after creating the main window).
@@ -460,6 +461,15 @@ where
 const WRY_WEBVIEW_CLASS: &str = "WRY_WEBVIEW";
 /// Stored original WndProc pointer (`SetWindowLongPtr` subclass).
 const ORIG_PROC_PROP: PCWSTR = windows::core::w!("GrokWvKbdFocusOrig");
+/// Primary WebView chosen before side-browser children are added.
+///
+/// The main window can contain the workbench WebView plus several native side
+/// browser WebViews. Picking the first visible child at every activation is
+/// nondeterministic and can move focus into the wrong surface.
+const PRIMARY_WEBVIEW_PROP: PCWSTR = windows::core::w!("GrokPrimaryWebview");
+/// Deferred focus message. Posting lets Windows finish the activation/focus
+/// transition before we inspect the current child focus.
+const FOCUS_REASSERT_MESSAGE: u32 = WM_APP + 0x4A1;
 static FORWARDING_KEYBOARD_FOCUS: AtomicBool = AtomicBool::new(false);
 
 /// Forward Alt-Tab / taskbar activation into the child WebView2 HWND.
@@ -477,6 +487,10 @@ fn attach_hwnd_webview_keyboard_focus(hwnd: HWND) {
         if !GetPropW(hwnd, ORIG_PROC_PROP).0.is_null() {
             return;
         }
+        // Capture the workbench WebView before any side-browser child is
+        // created. This gives activation recovery a stable target instead of
+        // whichever child happens to be first in z-order later.
+        remember_primary_webview(hwnd);
         let prev = SetWindowLongPtrW(
             hwnd,
             GWLP_WNDPROC,
@@ -503,12 +517,21 @@ unsafe extern "system" fn keyboard_focus_wndproc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if should_handle_focus_message(msg, wparam.0 as u32) {
+    if msg == FOCUS_REASSERT_MESSAGE {
         forward_keyboard_focus_to_webview(hwnd);
     }
     let orig = GetPropW(hwnd, ORIG_PROC_PROP);
     if msg == WM_NCDESTROY {
         let _ = RemovePropW(hwnd, ORIG_PROC_PROP);
+        let _ = RemovePropW(hwnd, PRIMARY_WEBVIEW_PROP);
+    }
+    if should_handle_focus_message(msg, wparam.0 as u32) {
+        // Do not call SetFocus from inside WM_ACTIVATE/WM_SETFOCUS. That
+        // re-enters the native focus chain while Windows is still dispatching
+        // activation and was the source of the observed focus oscillation.
+        unsafe {
+            let _ = PostMessageW(Some(hwnd), FOCUS_REASSERT_MESSAGE, WPARAM(0), LPARAM(0));
+        }
     }
     type WndProcFn = unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT;
     let prev: WNDPROC = if orig.0.is_null() {
@@ -531,7 +554,15 @@ fn forward_keyboard_focus_to_webview(hwnd: HWND) {
         if !focus.0.is_null() && IsChild(hwnd, focus).as_bool() {
             return;
         }
-        if let Some(child) = first_visible_wry_webview_child(hwnd) {
+        let child = primary_webview_child(hwnd).or_else(|| {
+            // A side-browser child may be created after startup. Only use a
+            // dynamic fallback while there is exactly one visible WRY child;
+            // with multiple children, guessing is worse than leaving focus
+            // where Windows put it.
+            let visible = visible_wry_webview_children(hwnd);
+            (visible.len() == 1).then(|| visible[0])
+        });
+        if let Some(child) = child {
             let _ = SetFocus(Some(child));
         }
     }
@@ -544,16 +575,64 @@ impl Drop for ForwardingGuard {
     }
 }
 
-fn first_visible_wry_webview_child(parent: HWND) -> Option<HWND> {
+fn remember_primary_webview(parent: HWND) -> Option<HWND> {
+    // Setup attaches the subclass while the top-level window is still
+    // hidden, so `IsWindowVisible` is false for the main WebView at this
+    // point. Capture any WRY child here; validity is rechecked before focus.
+    let child = all_wry_webview_children(parent).into_iter().next()?;
     unsafe {
-        let mut child = hwnd_or_none(GetWindow(parent, GW_CHILD).ok())?;
-        loop {
-            if IsWindowVisible(child).as_bool() && hwnd_is_wry_webview(child) {
-                return Some(child);
-            }
-            child = hwnd_or_none(GetWindow(child, GW_HWNDNEXT).ok())?;
+        let _ = SetPropW(
+            parent,
+            PRIMARY_WEBVIEW_PROP,
+            Some(HANDLE(child.0 as *mut std::ffi::c_void)),
+        );
+    }
+    Some(child)
+}
+
+fn primary_webview_child(parent: HWND) -> Option<HWND> {
+    unsafe {
+        let raw = GetPropW(parent, PRIMARY_WEBVIEW_PROP);
+        if raw.0.is_null() {
+            return None;
+        }
+        let child = HWND(raw.0);
+        if IsWindow(Some(child)).as_bool()
+            && IsWindowVisible(child).as_bool()
+            && IsChild(parent, child).as_bool()
+            && hwnd_is_wry_webview(child)
+        {
+            Some(child)
+        } else {
+            None
         }
     }
+}
+
+fn visible_wry_webview_children(parent: HWND) -> Vec<HWND> {
+    all_wry_webview_children(parent)
+        .into_iter()
+        .filter(|child| unsafe { IsWindowVisible(*child).as_bool() })
+        .collect()
+}
+
+fn all_wry_webview_children(parent: HWND) -> Vec<HWND> {
+    let mut out = Vec::new();
+    unsafe {
+        let Some(mut child) = hwnd_or_none(GetWindow(parent, GW_CHILD).ok()) else {
+            return out;
+        };
+        loop {
+            if hwnd_is_wry_webview(child) {
+                out.push(child);
+            }
+            let Some(next) = hwnd_or_none(GetWindow(child, GW_HWNDNEXT).ok()) else {
+                break;
+            };
+            child = next;
+        }
+    }
+    out
 }
 
 fn hwnd_or_none(hwnd: Option<HWND>) -> Option<HWND> {
@@ -658,6 +737,13 @@ mod tests {
             WA_ACTIVE | (1 << 16)
         ));
         assert!(!should_handle_focus_message(WM_ACTIVATEAPP, WA_ACTIVE));
+    }
+
+    #[test]
+    fn focus_reassert_message_is_private_to_this_module() {
+        assert!(FOCUS_REASSERT_MESSAGE >= WM_APP);
+        assert_ne!(FOCUS_REASSERT_MESSAGE, WM_SETFOCUS);
+        assert_ne!(FOCUS_REASSERT_MESSAGE, WM_ACTIVATE);
     }
 
     #[test]

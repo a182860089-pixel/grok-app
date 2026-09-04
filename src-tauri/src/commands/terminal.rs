@@ -102,8 +102,28 @@ pub async fn side_browser_create(
 }
 
 #[tauri::command]
-pub fn side_browser_close(app: AppHandle, label: String) -> Result<(), String> {
-    side_browser_host::close(&app, label)
+pub async fn side_browser_close(app: AppHandle, label: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || side_browser_host::close(&app, label))
+        .await
+        .map_err(|e| format!("side_browser_close join: {e}"))?
+}
+
+/// Update a side-browser child rectangle atomically so position and size do
+/// not cross in flight while the sidebar is being resized.
+#[tauri::command]
+pub async fn side_browser_set_bounds(
+    app: AppHandle,
+    label: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        side_browser_host::set_bounds(&app, label, x, y, width, height)
+    })
+    .await
+    .map_err(|e| format!("side_browser_set_bounds join: {e}"))?
 }
 
 #[tauri::command]
@@ -112,13 +132,21 @@ pub fn side_browser_list(app: AppHandle) -> Result<Vec<SideBrowserInfo>, String>
 }
 
 #[tauri::command]
-pub fn side_browser_navigate(app: AppHandle, label: String, url: String) -> Result<(), String> {
-    side_browser_host::navigate(&app, label, url)
+pub async fn side_browser_navigate(
+    app: AppHandle,
+    label: String,
+    url: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || side_browser_host::navigate(&app, label, url))
+        .await
+        .map_err(|e| format!("side_browser_navigate join: {e}"))?
 }
 
 #[tauri::command]
-pub fn side_browser_reload(app: AppHandle, label: String) -> Result<(), String> {
-    side_browser_host::reload(&app, label)
+pub async fn side_browser_reload(app: AppHandle, label: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || side_browser_host::reload(&app, label))
+        .await
+        .map_err(|e| format!("side_browser_reload join: {e}"))?
 }
 
 #[tauri::command]

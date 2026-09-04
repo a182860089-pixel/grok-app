@@ -1769,6 +1769,8 @@ pub fn run() {
 
             commands::side_browser_close,
 
+            commands::side_browser_set_bounds,
+
             commands::side_browser_list,
 
             commands::side_browser_navigate,

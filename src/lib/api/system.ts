@@ -125,6 +125,19 @@ export async function sideBrowserClose(label: string) {
   return invoke<void>("side_browser_close", { label });
 }
 
+export async function sideBrowserSetBounds(
+  label: string,
+  bounds: { x: number; y: number; width: number; height: number },
+) {
+  return invoke<void>("side_browser_set_bounds", {
+    label,
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+  });
+}
+
 export async function sideBrowserList() {
   return invoke<SideBrowserInfo[]>("side_browser_list");
 }

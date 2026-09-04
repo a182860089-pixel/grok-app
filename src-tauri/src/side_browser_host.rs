@@ -35,7 +35,7 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::webview::{DownloadEvent, PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl};
-use tauri::{LogicalPosition, LogicalSize, Url};
+use tauri::{LogicalPosition, LogicalSize, Rect, Url};
 
 pub const LABEL_PREFIX: &str = "resource-browser";
 const DOWNLOAD_EVENT: &str = "side-browser://download";
@@ -344,11 +344,11 @@ pub fn create(
             "reusing existing side browser webview"
         );
         existing
-            .set_position(LogicalPosition::new(x, y))
-            .map_err(|e| format!("reuse side browser position: {e}"))?;
-        existing
-            .set_size(LogicalSize::new(width, height))
-            .map_err(|e| format!("reuse side browser size: {e}"))?;
+            .set_bounds(Rect {
+                position: LogicalPosition::new(x, y).into(),
+                size: LogicalSize::new(width, height).into(),
+            })
+            .map_err(|e| format!("reuse side browser bounds: {e}"))?;
         let should_navigate = existing
             .url()
             .map(|current| current != parsed)
@@ -712,6 +712,47 @@ pub fn close(app: &AppHandle, label: String) -> Result<(), String> {
     clear_focus_if(&label);
     if let Some(wv) = app.get_webview(&label) {
         wv.close().map_err(|e| format!("side browser close: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Apply a child-webview rectangle in one runtime dispatch. Sending separate
+/// position/size commands during a sidebar drag lets WebView2 paint one frame
+/// with mixed old/new bounds and, under focus changes, can leave input routed
+/// to a stale surface. `set_bounds` keeps the pair together.
+pub fn set_bounds(
+    app: &AppHandle,
+    label: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    validate_side_label(&label)?;
+    if !x.is_finite() || !y.is_finite() || !width.is_finite() || !height.is_finite() {
+        return Err("side browser bounds must be finite".into());
+    }
+    let width = width.max(2.0);
+    let height = height.max(2.0);
+    let wv = get_side_webview(app, &label)?;
+    let started = std::time::Instant::now();
+    wv.set_bounds(Rect {
+        position: LogicalPosition::new(x, y).into(),
+        size: LogicalSize::new(width, height).into(),
+    })
+    .map_err(|e| format!("side browser bounds: {e}"))?;
+    let elapsed_ms = started.elapsed().as_millis();
+    if elapsed_ms >= 250 {
+        tracing::warn!(
+            target: "side_browser",
+            webview_label = %label,
+            elapsed_ms,
+            x,
+            y,
+            width,
+            height,
+            "slow side browser bounds update"
+        );
     }
     Ok(())
 }
