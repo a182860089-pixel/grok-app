@@ -624,12 +624,13 @@ impl SessionManager {
                     // agent session id may belong to another App session.
                     if let Some(acp) = live.acp.clone() {
                         if let Some(sid) = live.meta.agent_session_id.clone() {
-                            if let Err(e) =
-                                Self::with_soft_rpc_budget(acp.set_model_for(&sid, &agent_model))
-                                    .await
-                            {
-                                tracing::warn!("acp set_model on unpark soft-fail: {e}");
-                            }
+                            Self::apply_catalog_or_spawn_model(
+                                &acp,
+                                Some(&sid),
+                                &prefs.model_id,
+                                &agent_model,
+                            )
+                            .await;
                             if let Err(e) =
                                 Self::with_soft_rpc_budget(acp.set_mode_for(&sid, &prefs.mode))
                                     .await
@@ -826,21 +827,30 @@ impl SessionManager {
                     &session_route,
                     crate::acp_client::SessionSpawnRoute::Custom { .. }
                 );
+                let target_provider = match &session_route {
+                    crate::acp_client::SessionSpawnRoute::Custom { provider_id } => {
+                        Some(provider_id.as_str())
+                    }
+                    crate::acp_client::SessionSpawnRoute::Official => None,
+                };
                 let gate = |alive: bool,
                             p_policy: PermissionPolicy,
                             p_effort: Option<&str>,
                             p_sandbox: Option<&str>,
-                            p_custom: bool| {
+                            p_custom: bool,
+                            p_provider: Option<&str>| {
                     Self::reuse_gate(
                         alive,
                         p_policy,
                         p_effort,
                         p_sandbox,
                         p_custom,
+                        p_provider,
                         policy,
                         &prefs.effort,
                         &eff_sandbox,
                         target_custom,
+                        target_provider,
                     )
                 };
                 let mut best: Option<(Arc<AcpClient>, String, Instant)> = None;
@@ -850,7 +860,8 @@ impl SessionManager {
                                      p_policy: PermissionPolicy,
                                      p_effort: Option<&str>,
                                      p_sandbox: Option<&str>,
-                                     p_custom: bool| {
+                                     p_custom: bool,
+                                     p_provider: Option<&str>| {
                     let mut parts = Vec::new();
                     if !alive {
                         parts.push("dead".into());
@@ -874,6 +885,12 @@ impl SessionManager {
                     }
                     if p_custom != target_custom {
                         parts.push(format!("route custom={p_custom}≠{target_custom}"));
+                    }
+                    if p_provider != target_provider {
+                        parts.push(format!(
+                            "provider {:?}≠{:?}",
+                            p_provider, target_provider
+                        ));
                     }
                     if parts.is_empty() {
                         parts.push("?".into());
@@ -914,6 +931,7 @@ impl SessionManager {
                                     p.effort.as_deref(),
                                     p.sandbox_profile.as_deref(),
                                     p.acp.is_custom_route(),
+                                    p.acp.custom_provider_id(),
                                 ) {
                                     Some((p.acp, p.process_id, p.created_at))
                                 } else {
@@ -932,6 +950,7 @@ impl SessionManager {
                                             p.effort.as_deref(),
                                             p.sandbox_profile.as_deref(),
                                             p.acp.is_custom_route(),
+                                            p.acp.custom_provider_id(),
                                         )
                                     ));
                                     None
@@ -977,6 +996,7 @@ impl SessionManager {
                         target_effort = %prefs.effort,
                         target_sandbox = %eff_sandbox,
                         target_custom_route = target_custom,
+                        target_provider = ?target_provider,
                         "connect reuse rejected (cold spawn): {}",
                         rejected.join(" | ")
                     );
@@ -1526,15 +1546,16 @@ impl SessionManager {
                 {
                     tracing::warn!("acp set_mode after session open soft-fail: {e}");
                 }
-                // #1000: mirror the unpark path — apply the same resolved model via
-                // session/set_model after session/new. Spawn `--model` alone is not
-                // enough when the composer id is an App `app_models` catalog id that
-                // CLI spawn resolves differently from ACP set_model.
-                if let Err(e) =
-                    Self::with_soft_rpc_budget(client.set_model(&agent_model)).await
-                {
-                    tracing::warn!("acp set_model after session open soft-fail: {e}");
-                }
+                // Catalog id first (session pick), then spawn alias (provider
+                // section id). Spawn `--model gpt` is not the same as
+                // `session/set_model gpt-5.6-sol`.
+                Self::apply_catalog_or_spawn_model(
+                    &client,
+                    None,
+                    &prefs.model_id,
+                    &agent_model,
+                )
+                .await;
                 emit_host_exit_heal(&app, &meta.id);
                 Ok(self.snapshot())
             }
@@ -1916,11 +1937,52 @@ impl SessionManager {
         collect_busy_reuse_process_ids(live_pid.as_deref(), bg_pids.iter().map(String::as_str))
     }
 
+    /// Apply the session catalog model, falling back to the spawn alias.
+    /// Custom children are spawned with `--model <provider_id>`; ACP
+    /// `session/set_model` still needs the `app_models` catalog id.
+    async fn apply_catalog_or_spawn_model(
+        acp: &AcpClient,
+        agent_session_id: Option<&str>,
+        catalog_id: &str,
+        spawn_alias: &str,
+    ) {
+        let catalog = catalog_id.trim();
+        let spawn = spawn_alias.trim();
+        let first = if !catalog.is_empty() { catalog } else { spawn };
+        if first.is_empty() {
+            return;
+        }
+        let first_res = match agent_session_id.filter(|s| !s.is_empty()) {
+            Some(sid) => {
+                Self::with_soft_rpc_budget(acp.set_model_for(sid, first)).await
+            }
+            None => Self::with_soft_rpc_budget(acp.set_model(first)).await,
+        };
+        if first_res.is_ok() {
+            return;
+        }
+        if let Err(e) = first_res {
+            tracing::warn!("session/set_model catalog id soft-fail: {e}");
+        }
+        if spawn.is_empty() || spawn == first {
+            return;
+        }
+        let fallback = match agent_session_id.filter(|s| !s.is_empty()) {
+            Some(sid) => {
+                Self::with_soft_rpc_budget(acp.set_model_for(sid, spawn)).await
+            }
+            None => Self::with_soft_rpc_budget(acp.set_model(spawn)).await,
+        };
+        if let Err(e) = fallback {
+            tracing::warn!("acp set_model spawn-alias soft-fail: {e}");
+        }
+    }
+
     /// Pure reuse gate — split out for unit tests (no AcpClient needed).
     /// Process-level spawn flags must match: permission policy, reasoning
-    /// effort, sandbox profile, and route class (official OIDC vs custom
-    /// relay — those cannot share a GROK_HOME). Model is session-level
-    /// (`set_model`), so it deliberately does not gate.
+    /// effort, sandbox profile, route class (official OIDC vs custom), and
+    /// custom provider id (`relay` vs `gpt`). Catalog model inside one vendor
+    /// is session-level (`set_model`) and does not gate.
     ///
     /// Sandbox: the CLI normalizes "off" to no `--sandbox` flag (stored as
     /// `None` on the client), while settings resolve to the string "off".
@@ -1935,16 +1997,19 @@ impl SessionManager {
         p_effort: Option<&str>,
         p_sandbox: Option<&str>,
         p_custom_route: bool,
+        p_provider_id: Option<&str>,
         policy: PermissionPolicy,
         effort: &str,
         sandbox: &str,
         target_custom_route: bool,
+        target_provider_id: Option<&str>,
     ) -> bool {
         alive
             && p_policy == policy
             && p_effort == Some(effort)
             && p_sandbox.unwrap_or("off") == sandbox
             && p_custom_route == target_custom_route
+            && p_provider_id == target_provider_id
     }
 
     /// Whether warm-reuse is safe for OS sandbox vs spawn cwd (#986).
@@ -2170,6 +2235,7 @@ mod connect_preserve_tests {
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
                 model_id: None,
+                provider_id: None,
                 archived: false,
                 pinned: false,
                 effort: None,
@@ -2266,6 +2332,7 @@ mod connect_preserve_tests {
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
                 model_id: None,
+                provider_id: None,
                 archived: false,
                 pinned: false,
                 effort: None,
@@ -2372,10 +2439,12 @@ mod reuse_gate_tests {
             Some("high"),
             Some("off"),
             true, // custom route
+            Some("relay"),
             ask(),
             "high",
             "off",
             true,
+            Some("relay"),
         ));
         // Policy mismatch blocks.
         assert!(!SessionManager::reuse_gate(
@@ -2384,10 +2453,12 @@ mod reuse_gate_tests {
             Some("high"),
             Some("off"),
             true,
+            Some("relay"),
             PermissionPolicy::parse("bypassPermissions"),
             "high",
             "off",
             true,
+            Some("relay"),
         ));
         // Effort mismatch blocks.
         assert!(!SessionManager::reuse_gate(
@@ -2396,10 +2467,12 @@ mod reuse_gate_tests {
             Some("high"),
             Some("off"),
             true,
+            Some("relay"),
             ask(),
             "low",
             "off",
             true,
+            Some("relay"),
         ));
         // Sandbox mismatch blocks.
         assert!(!SessionManager::reuse_gate(
@@ -2408,10 +2481,12 @@ mod reuse_gate_tests {
             Some("high"),
             Some("off"),
             true,
+            Some("relay"),
             ask(),
             "high",
             "workspace",
             true,
+            Some("relay"),
         ));
         // Route class mismatch blocks (official target vs custom parked).
         assert!(!SessionManager::reuse_gate(
@@ -2420,10 +2495,26 @@ mod reuse_gate_tests {
             Some("high"),
             Some("off"),
             true,
+            Some("relay"),
             ask(),
             "high",
             "off",
             false,
+            None,
+        ));
+        // Custom vendor mismatch blocks (relay process vs gpt session).
+        assert!(!SessionManager::reuse_gate(
+            true,
+            ask(),
+            Some("high"),
+            Some("off"),
+            true,
+            Some("relay"),
+            ask(),
+            "high",
+            "off",
+            true,
+            Some("gpt"),
         ));
         // Dead process blocks.
         assert!(!SessionManager::reuse_gate(
@@ -2432,10 +2523,12 @@ mod reuse_gate_tests {
             Some("high"),
             Some("off"),
             true,
+            Some("relay"),
             ask(),
             "high",
             "off",
             true,
+            Some("relay"),
         ));
     }
 

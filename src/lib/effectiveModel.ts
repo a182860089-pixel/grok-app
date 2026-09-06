@@ -28,7 +28,7 @@ export function effectiveComposerModel(
  * Label for the composer model chip.
  *
  * Official route: catalog label (or model id).
- * Custom route: provider display `name`, falling back to request `model`.
+ * Custom route: selected catalog entry name, falling back to request `model`.
  */
 export function composerModelChipLabel(opts: {
   modelId: string;
@@ -43,4 +43,32 @@ export function composerModelChipLabel(opts: {
     if (model) return model;
   }
   return opts.officialLabel || opts.modelId;
+}
+
+/** Resolve the custom-route chip to the session's selected model, not the provider default. */
+export function customRouteChipModel(opts: {
+  provider:
+    | {
+        name: string;
+        model: string;
+        models?: Array<{ id: string; name: string }>;
+      }
+    | null
+    | undefined;
+  sessionModelId: string;
+}): { name: string; model: string } | null {
+  const p = opts.provider;
+  if (!p) return null;
+  const activeId = (opts.sessionModelId.trim() || p.model.trim());
+  if (!activeId) {
+    const name = p.name.trim();
+    const model = p.model.trim();
+    if (!name && !model) return null;
+    return { name: name || model, model };
+  }
+  const entry = p.models?.find((m) => m.id === activeId);
+  if (entry) {
+    return { name: entry.name || entry.id, model: entry.id };
+  }
+  return { name: activeId, model: activeId };
 }

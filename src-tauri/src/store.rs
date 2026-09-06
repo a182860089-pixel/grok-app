@@ -1852,6 +1852,7 @@ pub fn create_session(
         created_at: now,
         updated_at: now,
         model_id: None,
+        provider_id: None,
         archived: false,
         pinned: false,
         effort: None,
@@ -3948,6 +3949,7 @@ mod tests {
             created_at: updated,
             updated_at: updated,
             model_id: None,
+            provider_id: None,
             archived: false,
             pinned,
             effort: None,
@@ -4425,6 +4427,7 @@ mod tests {
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
                 model_id: None,
+                provider_id: None,
                 archived: false,
                 pinned: false,
                 effort: None,
@@ -4923,6 +4926,41 @@ mod tests {
         assert!(bound.fork_agent_session);
 
         let _ = delete_session(&meta.id);
+        std::env::remove_var("GROK_APP_HOME");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn stamp_session_model_route_is_independent_of_global_scope() {
+        let _g = crate::paths::APP_HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join(format!(
+            "grok-app-session-route-{}-{}",
+            std::process::id(),
+            Uuid::new_v4()
+        ));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).expect("tmp home");
+        std::env::set_var("GROK_APP_HOME", &tmp);
+        let _ = ensure_app_dirs();
+
+        let a = create_session(None, Some("a".into()), false).expect("a");
+        let b = create_session(None, Some("b".into()), false).expect("b");
+        stamp_session_model_route(Some(&a.id), Some("grok-4.6"), Some("official"))
+            .expect("stamp a");
+        stamp_session_model_route(Some(&b.id), Some("deepseek-chat"), Some("yunyi"))
+            .expect("stamp b");
+
+        let prefs_a = resolve_composer_prefs(None, Some(&a.id));
+        let prefs_b = resolve_composer_prefs(None, Some(&b.id));
+        assert_eq!(prefs_a.model_id, "grok-4.6");
+        assert_eq!(prefs_a.provider_id.as_deref(), Some("official"));
+        assert_eq!(prefs_b.model_id, "deepseek-chat");
+        assert_eq!(prefs_b.provider_id.as_deref(), Some("yunyi"));
+
+        let _ = delete_session(&a.id);
+        let _ = delete_session(&b.id);
         std::env::remove_var("GROK_APP_HOME");
         let _ = fs::remove_dir_all(&tmp);
     }

@@ -292,6 +292,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             model_id: None,
+            provider_id: None,
             archived: false,
             pinned: false,
             mode: None,

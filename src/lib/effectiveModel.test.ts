@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   composerModelChipLabel,
+  customRouteChipModel,
   effectiveComposerModel,
 } from "./effectiveModel";
 
@@ -55,5 +56,25 @@ describe("composerModelChipLabel", () => {
         activeCustom: { name: "  ", model: "deepseek-chat" },
       }),
     ).toBe("deepseek-chat");
+  });
+
+  it("uses the session model, not the provider default", () => {
+    expect(
+      composerModelChipLabel({
+        modelId: "gpt-5.6-sol",
+        officialLabel: "Grok 4.6",
+        activeCustom: customRouteChipModel({
+          provider: {
+            name: "gpt",
+            model: "gpt-6-astra",
+            models: [
+              { id: "gpt-5.6-sol", name: "gpt-5.6-sol" },
+              { id: "gpt-6-astra", name: "gpt-6-astra" },
+            ],
+          },
+          sessionModelId: "gpt-5.6-sol",
+        }),
+      }),
+    ).toBe("gpt-5.6-sol");
   });
 });

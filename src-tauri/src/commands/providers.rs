@@ -53,12 +53,12 @@ pub async fn providers_list() -> Result<crate::providers::ProvidersListResult, S
 
 /// Activate official Grok Build or a custom provider; returns updated list.
 ///
-/// Recycles warm agents so the next send spawns with rebound auth / config
-/// (no full app restart).
+/// Sets the default vendor for **new** chats. Running sessions keep their own
+/// provider and ACP child (no recycle_all).
 #[tauri::command]
 pub async fn providers_activate(
-    app: tauri::AppHandle,
-    mgr: State<'_, Arc<SessionManager>>,
+    _app: tauri::AppHandle,
+    _mgr: State<'_, Arc<SessionManager>>,
     source: String,
     provider_id: Option<String>,
 ) -> Result<crate::providers::ProvidersListResult, String> {
@@ -107,10 +107,6 @@ pub async fn providers_activate(
     let mode = store::load_settings().session_data_mode.clone();
     let _ = crate::official_aux::sync_native_media_block_hook_for_current(&mode);
     let _ = crate::extensions::sync_user_mcp_for_official_aux_inject(&mode);
-    // Default route only seeds **new** chats. Running sessions keep their own
-    // provider + ACP child; do not recycle_all on a picker activate.
-    let _ = app;
-    let _ = mgr;
     Ok(result)
 }
 

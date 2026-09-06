@@ -1431,7 +1431,18 @@ pub fn custom_provider_id_for_catalog_model(catalog_id: &str) -> Option<String> 
 /// Uses the **global** active route. Prefer [`agent_spawn_model_id_for`] when
 /// a session has its own provider so two chats can stay on different vendors.
 pub fn agent_spawn_model_id(composer_model: &str) -> String {
-    agent_spawn_model_id_for(composer_model, &active_route())
+    match active_route() {
+        ActiveRoute::Custom { id } => id,
+        ActiveRoute::Official => {
+            let m = composer_model.trim();
+            // #1000: picker stored a custom catalog id while the global route
+            // is still official. Session-owned Official must not take this path.
+            if let Some(provider_id) = custom_provider_id_for_catalog_model(m) {
+                return provider_id;
+            }
+            agent_spawn_model_id_for(m, &ActiveRoute::Official)
+        }
+    }
 }
 
 /// Spawn `--model` for an explicit route (session-owned, not global default).
@@ -3821,5 +3832,53 @@ context_window = "1000000"
             !config.contains("extra_headers"),
             "empty list must drop extra_headers, not copy the old table:\n{config}"
         );
+    }
+
+    #[test]
+    fn route_from_provider_id_treats_official_and_blank_as_official() {
+        assert_eq!(route_from_provider_id(None), ActiveRoute::Official);
+        assert_eq!(route_from_provider_id(Some("")), ActiveRoute::Official);
+        assert_eq!(
+            route_from_provider_id(Some("official")),
+            ActiveRoute::Official
+        );
+        assert_eq!(
+            route_from_provider_id(Some("yunyi")),
+            ActiveRoute::Custom { id: "yunyi".into() }
+        );
+    }
+
+    #[test]
+    fn spawn_model_for_explicit_official_keeps_catalog_id() {
+        assert_eq!(
+            agent_spawn_model_id_for("grok-4.5", &ActiveRoute::Official),
+            "grok-4.5"
+        );
+        assert_eq!(
+            agent_spawn_model_id_for("deepseek-chat", &ActiveRoute::Custom { id: "yunyi".into() }),
+            "yunyi"
+        );
+    }
+
+    #[test]
+    fn custom_inference_home_copies_config_and_strips_auth() {
+        let tmp = std::env::temp_dir().join(format!(
+            "grok-custom-home-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let src_home = tmp.join("src");
+        let dest = tmp.join("dest");
+        std::fs::create_dir_all(&src_home).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        let src_config = src_home.join("config.toml");
+        std::fs::write(&src_config, "[models]\ndefault = \"yunyi\"\n").unwrap();
+        std::fs::write(dest.join("auth.json"), "{}").unwrap();
+        let out = materialize_custom_inference_home(&src_config, &dest).unwrap();
+        assert_eq!(out, dest);
+        let copied = std::fs::read_to_string(dest.join("config.toml")).unwrap();
+        assert!(copied.contains("yunyi"));
+        assert!(!dest.join("auth.json").exists());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

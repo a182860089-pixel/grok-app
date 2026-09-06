@@ -370,6 +370,9 @@ pub struct AcpClient {
     /// provider section id; that mis-labeled processes as "official" and
     /// let them be reused after auth.json was cleared → #528 re-login).
     custom_route: bool,
+    /// Custom `[model.<id>]` section this process was spawned with (`--model gpt`).
+    /// Distinct custom vendors cannot share a child: CLI catalog is bound at spawn.
+    custom_provider_id: Option<String>,
     /// Agent `initialize` advertisement for rewind RPCs.
     /// `None` = unknown (try RPC); `Some(false)` = skip; `Some(true)` = call.
     rewind_supported: ParkingMutex<Option<bool>>,
@@ -1329,6 +1332,18 @@ impl AcpClient {
                 ),
             }
         };
+        let custom_provider_id = if !custom_route {
+            None
+        } else {
+            match &session_route {
+                Some(SessionSpawnRoute::Custom { provider_id }) => Some(provider_id.clone()),
+                Some(SessionSpawnRoute::Official) => None,
+                None => match crate::providers::active_route() {
+                    crate::providers::ActiveRoute::Custom { id } => Some(id),
+                    crate::providers::ActiveRoute::Official => None,
+                },
+            }
+        };
         let custom_home = if custom_route && home_override.is_none() {
             crate::providers::prepare_custom_inference_home().ok()
         } else {
@@ -1810,6 +1825,7 @@ impl AcpClient {
             empty_mcp_servers,
             sandbox_profile: ParkingMutex::new(sandbox.map(|sb| sb.profile.clone())),
             custom_route,
+            custom_provider_id,
             rewind_supported: ParkingMutex::new(None),
             ssh_alias: ssh_alias.clone(),
         });
@@ -1907,6 +1923,7 @@ impl AcpClient {
             sandbox_profile: ParkingMutex::new(None),
             // Remote ACP: treat as official-class for reuse (no local auth strip).
             custom_route: false,
+            custom_provider_id: None,
             rewind_supported: ParkingMutex::new(None),
             ssh_alias: None,
         });
@@ -1917,6 +1934,11 @@ impl AcpClient {
     /// Whether this process was spawned for a custom relay route (api_key only).
     pub fn is_custom_route(&self) -> bool {
         self.custom_route
+    }
+
+    /// Provider section id this child was spawned with (`gpt` / `relay` / …).
+    pub fn custom_provider_id(&self) -> Option<&str> {
+        self.custom_provider_id.as_deref()
     }
 
     /// Spawn the transport read loop over any `AsyncRead` (child stdout or the

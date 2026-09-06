@@ -15,6 +15,19 @@ use crate::store::{self};
 
 use super::*;
 
+/// Official ↔ custom, or custom vendor A ↔ vendor B (`relay` vs `gpt`).
+/// Catalog switches inside one vendor stay on the same child (`set_model`).
+fn inference_route_changed(
+    acp: &AcpClient,
+    next_custom: bool,
+    next_provider_id: Option<&str>,
+) -> bool {
+    if acp.is_custom_route() != next_custom {
+        return true;
+    }
+    next_custom && acp.custom_provider_id() != next_provider_id
+}
+
 impl SessionManager {
     pub fn set_permission_policy(&self, policy: PermissionPolicy) {
         if let Some(s) = self.inner.lock().as_mut() {
@@ -608,6 +621,10 @@ impl SessionManager {
             crate::providers::ActiveRoute::Official => "official".to_string(),
             crate::providers::ActiveRoute::Custom { id } => id.clone(),
         };
+        let next_provider_id = match &next_route {
+            crate::providers::ActiveRoute::Custom { id } => Some(id.as_str()),
+            crate::providers::ActiveRoute::Official => None,
+        };
 
         let mut acp: Option<Arc<AcpClient>> = None;
         let mut agent_sid: Option<String> = None;
@@ -620,7 +637,10 @@ impl SessionManager {
                 s.meta.model_id = Some(model_id.clone());
                 s.meta.provider_id = Some(next_provider_label.clone());
                 let _ = store::update_session_meta(&s.meta);
-                route_changed = s.acp.as_ref().is_some_and(|c| c.is_custom_route() != next_custom);
+                route_changed = s
+                    .acp
+                    .as_ref()
+                    .is_some_and(|c| inference_route_changed(c, next_custom, next_provider_id));
                 acp = s.acp.clone();
                 agent_sid = s.meta.agent_session_id.clone();
             }
@@ -631,7 +651,10 @@ impl SessionManager {
                 s.meta.model_id = Some(model_id.clone());
                 s.meta.provider_id = Some(next_provider_label.clone());
                 let _ = store::update_session_meta(&s.meta);
-                route_changed = s.acp.as_ref().is_some_and(|c| c.is_custom_route() != next_custom);
+                route_changed = s
+                    .acp
+                    .as_ref()
+                    .is_some_and(|c| inference_route_changed(c, next_custom, next_provider_id));
                 acp = s.acp.clone();
                 agent_sid = s.meta.agent_session_id.clone();
             }
@@ -643,7 +666,7 @@ impl SessionManager {
                 p.meta.model_id = Some(model_id.clone());
                 p.meta.provider_id = Some(next_provider_label.clone());
                 let _ = store::update_session_meta(&p.meta);
-                route_changed = p.acp.is_custom_route() != next_custom;
+                route_changed = inference_route_changed(&p.acp, next_custom, next_provider_id);
                 if route_changed {
                     if !self.has_other_process_tenant(&p.process_id, session_id) {
                         let doomed = p.acp;
