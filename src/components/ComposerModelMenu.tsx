@@ -36,7 +36,10 @@ import {
   type ComposerModelPick,
   type ComposerProviderInput,
 } from "@/lib/composerModelGroups";
-import { composerModelChipLabel } from "@/lib/effectiveModel";
+import {
+  composerModelChipLabel,
+  customRouteChipModel,
+} from "@/lib/effectiveModel";
 import { formatTokenCount } from "@/lib/contextUsage";
 import { Tip } from "@/components/ui/tooltip";
 import {
@@ -63,7 +66,7 @@ import {
   rectOverlapsNativeWebviewHost,
 } from "@/lib/nativeWebviewCover";
 
-type Pane = "simple" | "advanced";
+type Pane = "models" | "simple" | "advanced";
 type HubFlyout = "models" | "effort" | "window";
 
 const FLYOUT_GAP = 8;
@@ -377,6 +380,8 @@ export interface ComposerModelMenuProps {
     modelSearchPlaceholder: string;
     /** Empty state when filter matches nothing. */
     modelSearchEmpty: string;
+    /** Footer under the model list (new chat vs current chat). */
+    modelPickerHint?: string;
     /** Section header for official catalog models. */
     modelGroupOfficial: string;
     /** @deprecated Prefer real custom groups via `providers`. */
@@ -585,7 +590,7 @@ export function ComposerModelMenu({
   contextWindowEditable = false,
   onContextWindow,
 }: ComposerModelMenuProps) {
-  const [pane, setPane] = useState<Pane>("simple");
+  const [pane, setPane] = useState<Pane>("models");
   const [modelQuery, setModelQuery] = useState("");
   const [windowDraft, setWindowDraft] = useState("");
   const modelSearchRef = useRef<HTMLInputElement>(null);
@@ -625,6 +630,15 @@ export function ComposerModelMenu({
     window.clearTimeout(flyLeave.current);
     setHubFlyout(id);
   };
+  /**
+   * Hover opens a flyout only when none is open. Crossing sibling rows
+   * (effort / window) while moving to the model list used to replace the
+   * list before a click could land.
+   */
+  const previewFlyout = (id: HubFlyout) => {
+    window.clearTimeout(flyLeave.current);
+    setHubFlyout((cur) => (cur == null ? id : cur));
+  };
   const modelList = models.length > 0 ? models : GROK_BUILD_MODELS;
   const groups = buildComposerModelGroups({
     officialModels: modelList,
@@ -653,7 +667,7 @@ export function ComposerModelMenu({
     if (modelMenu.open && !modelMenu.exiting) return;
     setHubFlyout(null);
     if (modelMenu.open) return;
-    setPane("simple");
+    setPane("models");
     setBodyH(undefined);
     clearModelQuery();
   }, [modelMenu.open, modelMenu.exiting]);
@@ -784,15 +798,15 @@ export function ComposerModelMenu({
           setHubFlyout(null);
           return;
         }
-        if (pane === "advanced") {
+        if (pane === "advanced" || pane === "simple") {
           e.preventDefault();
           e.stopPropagation();
           e.stopImmediatePropagation();
-          goPane("simple");
+          goPane("models");
           return;
         }
       }
-      if (hubFlyout !== "models") return;
+      if (hubFlyout !== "models" && pane !== "models") return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key.length !== 1) return;
       const active = document.activeElement;
@@ -813,21 +827,16 @@ export function ComposerModelMenu({
 
   const activeCustom =
     activeSource === "custom" && activeProviderId
-      ? (() => {
-          const p = providers.find((x) => x.id === activeProviderId);
-          if (!p) return null;
-          const activeId = p.model?.trim() ?? "";
-          const entry =
-            p.models?.find((m) => m.id === activeId) ??
-            (activeId ? { id: activeId, name: activeId } : null);
-          return entry
-            ? { name: entry.name || entry.id, model: entry.id }
-            : { name: p.name, model: p.model };
-        })()
+      ? customRouteChipModel({
+          provider: providers.find((x) => x.id === activeProviderId),
+          sessionModelId: modelId,
+        })
       : null;
   const activeRequestModel =
     activeSource === "custom"
-      ? providers.find((x) => x.id === activeProviderId)?.model ?? null
+      ? modelId ||
+        providers.find((x) => x.id === activeProviderId)?.model ||
+        null
       : null;
   const officialLabel = activeModel?.label ?? modelId;
   const modelLabel = composerModelChipLabel({
@@ -859,7 +868,9 @@ export function ComposerModelMenu({
         "cmm--model" + (activeStop?.accent === "ultra" ? " cmm--extra" : "")
       }
       panelClassName={
-        "cmm__pop--model" + (pane === "advanced" ? " cmm__pop--hub" : "")
+        "cmm__pop--model" +
+        (pane === "advanced" ? " cmm__pop--hub" : "") +
+        (pane === "models" ? " cmm__pop--catalog" : "")
       }
       tipClassName="ui-tip--flat"
       triggerIcon={<IconBolt size={14} />}
@@ -880,9 +891,89 @@ export function ComposerModelMenu({
         }}
       >
         <div
-          className={"cmm__stage" + (pane === "advanced" ? " is-hub" : "")}
+          className={
+            "cmm__stage" +
+            (pane === "advanced"
+              ? " is-hub"
+              : pane === "simple"
+                ? " is-simple"
+                : " is-catalog")
+          }
           ref={stageRef}
         >
+          <div className="cmm__catalog-body" aria-hidden={pane !== "models"}>
+            <div className="cmm__flyout-head">{labels.model}</div>
+            <div className="cmm__search">
+              <input
+                ref={pane === "models" ? modelSearchRef : undefined}
+                type="search"
+                className="cmm__search-input"
+                value={modelQuery}
+                onChange={(e) => setModelQuery(e.target.value)}
+                placeholder={labels.modelSearchPlaceholder}
+                aria-label={labels.modelSearchPlaceholder}
+                autoComplete="off"
+                spellCheck={false}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.preventDefault();
+                }}
+              />
+            </div>
+            <div className="cmm__flyout-list">
+              {filteredGroups.length === 0 ? (
+                <div className="cmm__opt cmm__opt--muted" role="status">
+                  <span className="cmm__opt-main">
+                    <span className="cmm__opt-title">
+                      {labels.modelSearchEmpty}
+                    </span>
+                  </span>
+                </div>
+              ) : (
+                filteredGroups.map((group) => (
+                  <div key={group.key}>
+                    {filteredGroups.length > 1 ? (
+                      <div className="cmm__section">{group.title}</div>
+                    ) : null}
+                    {group.entries.map((entry) => {
+                      const active = isComposerModelEntryActive(entry, {
+                        activeSource,
+                        activeProviderId,
+                        activeRequestModel,
+                        modelId,
+                      });
+                      return (
+                        <button
+                          key={entry.key}
+                          type="button"
+                          className={"cmm__opt" + (active ? " is-active" : "")}
+                          title={
+                            entry.subtitle
+                              ? `${entry.title} · ${entry.subtitle}`
+                              : entry.title
+                          }
+                          onClick={() => selectPick(entry.pick)}
+                        >
+                          <span className="cmm__opt-main">
+                            <span className="cmm__opt-title">{entry.title}</span>
+                          </span>
+                          {active ? (
+                            <span className="cmm__opt-check" aria-hidden>
+                              <IconCheck size={16} />
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))
+              )}
+            </div>
+            {labels.modelPickerHint ? (
+              <div className="cmm__flyout-hint" role="note">
+                {labels.modelPickerHint}
+              </div>
+            ) : null}
+          </div>
           <div className="cmm__simple-body" aria-hidden={pane !== "simple"}>
             <div className="cmm__simple-head">
               <span
@@ -919,7 +1010,7 @@ export function ComposerModelMenu({
               }
               aria-haspopup="true"
               aria-expanded={hubFlyout === "models"}
-              onMouseEnter={() => showFlyout("models")}
+              onMouseEnter={() => previewFlyout("models")}
               onFocus={() => showFlyout("models")}
               onClick={() => showFlyout("models")}
             >
@@ -937,7 +1028,7 @@ export function ComposerModelMenu({
               }
               aria-haspopup="true"
               aria-expanded={hubFlyout === "effort"}
-              onMouseEnter={() => showFlyout("effort")}
+              onMouseEnter={() => previewFlyout("effort")}
               onFocus={() => showFlyout("effort")}
               onClick={() => showFlyout("effort")}
             >
@@ -968,7 +1059,7 @@ export function ComposerModelMenu({
                     ? String(contextWindow)
                     : "",
                 );
-                showFlyout("window");
+                previewFlyout("window");
               }}
               onFocus={() => showFlyout("window")}
               onClick={() => showFlyout("window")}
@@ -998,7 +1089,7 @@ export function ComposerModelMenu({
             type="button"
             className="cmm__advanced"
             onClick={() =>
-              goPane(pane === "advanced" ? "simple" : "advanced")
+              goPane(pane === "advanced" ? "models" : "advanced")
             }
           >
             {advancedLabel}
@@ -1021,6 +1112,7 @@ export function ComposerModelMenu({
               data-kind={hubFlyout}
               style={flyPos}
               onMouseEnter={() => hubFlyout && showFlyout(hubFlyout)}
+              onMouseDown={(e) => e.stopPropagation()}
             >
               {hubFlyout === "models" ? (
                 groups.length === 0 ? (
@@ -1031,9 +1123,10 @@ export function ComposerModelMenu({
                   </div>
                 ) : (
                   <div className="cmm__flyout-stack">
+                    <div className="cmm__flyout-head">{labels.model}</div>
                     <div className="cmm__search">
                       <input
-                        ref={modelSearchRef}
+                        ref={pane === "advanced" ? modelSearchRef : undefined}
                         type="search"
                         className="cmm__search-input"
                         value={modelQuery}
@@ -1106,6 +1199,11 @@ export function ComposerModelMenu({
                         ))
                       )}
                     </div>
+                    {labels.modelPickerHint ? (
+                      <div className="cmm__flyout-hint" role="note">
+                        {labels.modelPickerHint}
+                      </div>
+                    ) : null}
                   </div>
                 )
               ) : hubFlyout === "effort" ? (

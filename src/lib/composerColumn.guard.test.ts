@@ -85,7 +85,8 @@ describe("composer column matches chat width", () => {
     expect(modelMenu).toContain("cmm__stage");
     expect(modelMenu).toContain("cmm__pop--flyout");
     expect(modelMenu).toContain('showFlyout("models")');
-    expect(modelMenu).not.toContain('goPane("models")');
+    expect(modelMenu).toContain("cmm__catalog-body");
+    expect(modelMenu).toContain('goPane("models")');
     const modelIdx = app.indexOf("<ComposerModelMenu");
     const accessIdx = app.indexOf("<ComposerAccessMenu");
     const sendIdx = app.indexOf("<ComposerSendCluster");

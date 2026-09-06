@@ -38,7 +38,10 @@ import {
   type ComposerModelPick,
   type ComposerProviderInput,
 } from "@/lib/composerModelGroups";
-import { composerModelChipLabel } from "@/lib/effectiveModel";
+import {
+  composerModelChipLabel,
+  customRouteChipModel,
+} from "@/lib/effectiveModel";
 import {
   formatTokenCount,
   hasContextUsageData,
@@ -81,6 +84,8 @@ export type PhoneComposerToolsSheetProps = {
     modeAsk: string;
     /** Section header for official catalog models. */
     modelGroupOfficial: string;
+    /** Footer under the model list (new chat vs current chat). */
+    modelPickerHint?: string;
     /** @deprecated Prefer real custom groups via `providers`. */
     modelViaProvider?: string;
     policyAsk: string;
@@ -255,21 +260,16 @@ export function PhoneComposerToolsSheet({
   });
   const activeCustom =
     activeSource === "custom" && activeProviderId
-      ? (() => {
-          const p = providers.find((x) => x.id === activeProviderId);
-          if (!p) return null;
-          const activeId = p.model?.trim() ?? "";
-          const entry =
-            p.models?.find((m) => m.id === activeId) ??
-            (activeId ? { id: activeId, name: activeId } : null);
-          return entry
-            ? { name: entry.name || entry.id, model: entry.id }
-            : { name: p.name, model: p.model };
-        })()
+      ? customRouteChipModel({
+          provider: providers.find((x) => x.id === activeProviderId),
+          sessionModelId: modelId,
+        })
       : null;
   const activeRequestModel =
     activeSource === "custom"
-      ? providers.find((x) => x.id === activeProviderId)?.model ?? null
+      ? modelId ||
+        providers.find((x) => x.id === activeProviderId)?.model ||
+        null
       : null;
   const effortCatalog = effortCatalogForRoute({
     model: findModel(modelId, modelList),
@@ -507,6 +507,11 @@ export function PhoneComposerToolsSheet({
                   })}
                 </div>
               ))}
+              {labels.modelPickerHint ? (
+                <p className="phone-sheet__hint" role="note">
+                  {labels.modelPickerHint}
+                </p>
+              ) : null}
               <SheetRow
                 icon={<IconActivity size={20} />}
                 label={labels.effort}

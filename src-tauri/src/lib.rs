@@ -69,6 +69,7 @@ mod side_browser_a11y;
 mod side_browser_blob;
 mod side_browser_host;
 mod side_browser_mcp;
+mod browser_broker;
 
 mod commands;
 
@@ -760,6 +761,15 @@ pub fn run() {
 
             // Editors / terminals / git GUIs: non-blocking background scan + cache.
             editors::start_background_scan_on_launch(app.handle().clone());
+
+            // Dedicated debug Chrome + chrome-devtools-mcp endpoint (off UI thread).
+            std::thread::Builder::new()
+                .name("browser-broker-boot".into())
+                .spawn(|| {
+                    crate::browser_broker::boot_restore();
+                    crate::browser_broker::start_keepalive();
+                })
+                .ok();
 
             // Media HTTP + relay proxy: never block setup/show. Frontend uses
             // try_state / soft-fail until ready (ensureMediaEndpoint retries).
@@ -1780,6 +1790,12 @@ pub fn run() {
             commands::side_browser_install_download_hook,
 
             commands::side_browser_set_focus,
+
+            browser_broker::browser_broker_snapshot,
+            browser_broker::browser_broker_connect,
+            browser_broker::browser_broker_disconnect,
+            browser_broker::browser_broker_launch_dedicated,
+            browser_broker::browser_broker_open_inspect,
 
             pet_window::pet_prefs_get,
             pet_window::pet_prefs_set,

@@ -82,6 +82,18 @@ pub fn current_endpoint() -> Option<BrowserMcpEndpoint> {
     ENDPOINT.get().cloned().or_else(read_endpoint_file)
 }
 
+/// Ask the UI to show the sidebar Browser tab (same path as agent tools).
+pub fn request_open(app: &AppHandle, url: &str) {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let _ = app.emit(
+        AGENT_OPEN_EVENT,
+        AgentOpenPayload {
+            url: url.to_string(),
+            request_id,
+        },
+    );
+}
+
 /// ACP `mcpServers[]` HTTP entry. Loopback + bearer — do **not** spawn the
 /// GUI `grok-app.exe` as stdio (Windows subsystem has no console stdin).
 /// `None` until the Host HTTP listener is up.

@@ -280,6 +280,7 @@ describe("composer chip portal pops", () => {
           modelSearchPlaceholder: "Search models",
           modelSearchEmpty: "No models",
           modelGroupOfficial: "Official",
+          modelPickerHint: "New chats use this model.",
           contextWindow: "Context window",
           contextWindowOfficial: "official",
           contextWindowCustom: "custom",
@@ -296,8 +297,10 @@ describe("composer chip portal pops", () => {
     await user.click(screen.getByRole("button", { name: "Model" }));
     const pop = bodyPop();
     expect(pop).not.toBeNull();
-    expect(pop!.querySelector('[role="slider"]')).not.toBeNull();
-    expect(pop!.textContent ?? "").toMatch(/Effort High/);
+    expect(
+      screen.getByRole("searchbox", { name: "Search models" }),
+    ).toBeTruthy();
+    expect(pop!.textContent ?? "").toMatch(/New chats use this model/);
     expect(screen.getByRole("button", { name: "Advanced" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.queryByRole("searchbox", { name: "Search models" })).toBeNull();
@@ -320,6 +323,56 @@ describe("composer chip portal pops", () => {
     expect(
       screen.getByRole("searchbox", { name: "Search models" }),
     ).toBeTruthy();
+  });
+
+  it("does not replace the model flyout when the pointer crosses sibling rows", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerModelMenu
+        modelId="test-model"
+        effort="high"
+        labels={{
+          model: "Model",
+          effort: "Effort",
+          effortHigh: "High",
+          effortMedium: "Medium",
+          effortLow: "Low",
+          modelSearchPlaceholder: "Search models",
+          modelSearchEmpty: "No models",
+          modelGroupOfficial: "Official",
+          contextWindow: "Context window",
+          contextWindowOfficial: "official",
+          contextWindowCustom: "custom",
+          contextWindowPlaceholder: "tokens",
+          contextWindowSave: "Save",
+          contextWindowOfficialHint: "unknown",
+          advanced: "Advanced",
+        }}
+        onEffort={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
+    const pop = bodyPop();
+    expect(pop).not.toBeNull();
+    const rows = pop!.querySelectorAll(".cmm__row");
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    fireEvent.mouseEnter(rows[0]!);
+    await waitFor(() => {
+      expect(
+        document.body.querySelector(":scope > .cmm__pop--flyout-models"),
+      ).not.toBeNull();
+    });
+    fireEvent.mouseEnter(rows[1]!);
+    expect(
+      document.body.querySelector(":scope > .cmm__pop--flyout-models"),
+    ).not.toBeNull();
+    expect(
+      document.body
+        .querySelector(":scope > .cmm__pop--flyout")
+        ?.getAttribute("data-kind"),
+    ).toBe("models");
   });
 
   it("keeps Advanced hub and model flyout open after picking a model", async () => {
@@ -500,8 +553,10 @@ describe("composer chip portal pops", () => {
     await user.click(trigger);
     const pop = bodyPop();
     expect(pop).not.toBeNull();
-    expect(pop!.querySelector('[role="slider"]')).not.toBeNull();
-    expect(screen.queryByRole("searchbox", { name: "Search models" })).toBeNull();
+    expect(
+      screen.getByRole("searchbox", { name: "Search models" }),
+    ).toBeTruthy();
+    expect(pop!.querySelector(".cmm__stage")?.className).toMatch(/is-catalog/);
   });
 
   it("localizes grok-4.6 xhigh via effort i18n in composer menu", async () => {
@@ -536,7 +591,9 @@ describe("composer chip portal pops", () => {
     await user.click(screen.getByRole("button", { name: "Model" }));
     const pop = bodyPop();
     expect(pop).not.toBeNull();
-    expect(pop!.textContent ?? "").toMatch(/Effort Extra high/);
+    expect(screen.getByRole("button", { name: "Model" }).textContent).toMatch(
+      /Extra high/,
+    );
     expect(pop!.textContent ?? "").not.toMatch(/\bxhigh\b/);
     await user.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.queryByRole("searchbox", { name: "Search models" })).toBeNull();

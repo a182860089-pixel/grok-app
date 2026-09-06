@@ -1374,14 +1374,17 @@ pub fn build_session_mcp_servers_with_opts(
         }
     }
 
-    // Always inject the in-app Browser MCP when the loopback listener is up
-    // so Agent can drive the same WebView the user is looking at (Cursor-style).
-    if let Some(entry) = crate::side_browser_mcp::acp_entry() {
-        tracing::info!(
-            target: "mcp_inject",
-            "injecting embedded-browser MCP (in-app WebView)"
-        );
-        arr.push(entry);
+    // In-app Browser MCP: default on, or when the user picked the sidebar
+    // WebView. Skip it when they selected an external Chrome so the agent
+    // does not drive both surfaces.
+    if crate::browser_broker::wants_embedded_mcp() {
+        if let Some(entry) = crate::side_browser_mcp::acp_entry() {
+            tracing::info!(
+                target: "mcp_inject",
+                "injecting embedded-browser MCP (in-app WebView)"
+            );
+            arr.push(entry);
+        }
     }
 
     Value::Array(arr)

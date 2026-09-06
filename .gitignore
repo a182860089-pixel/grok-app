@@ -10,6 +10,7 @@ lerna-debug.log*
 # Dependencies & build output
 node_modules
 .grok-app-dev-home
+.dev-app-home
 .cargo-home
 dist
 dist-ssr

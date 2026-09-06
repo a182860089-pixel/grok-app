@@ -676,6 +676,15 @@
   padding: 12px 12px 6px;
 }
 
+.phone-sheet__hint {
+  margin: 8px 12px 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle, rgba(127, 127, 127, 0.18));
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+
 .phone-sheet__row {
   display: flex;
   align-items: center;

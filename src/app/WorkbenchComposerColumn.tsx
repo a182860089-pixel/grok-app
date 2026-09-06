@@ -85,7 +85,6 @@ export function WorkbenchComposerColumn(p: WorkbenchComposerColumnProps) {
     mainPane,
     tr,
     session,
-    locale,
   } = p;
   const [permBusy, setPermBusy] = useState(false);
   const [permError, setPermError] = useState<string | null>(null);

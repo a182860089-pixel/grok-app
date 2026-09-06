@@ -16,6 +16,7 @@ import {
   ComposerAccessMenu,
   ComposerModelMenu,
 } from "@/components/ComposerModelMenu";
+import { BrowserBrokerChip } from "@/components/BrowserBrokerPanel";
 import { ComposerPlusPanel } from "@/components/ComposerPlusPanel";
 import { ComposerQuoteCards } from "@/components/ComposerQuoteCards";
 import { ContextUsageChip } from "@/components/ContextUsageChip";
@@ -667,6 +668,7 @@ export function WorkbenchComposerShell(p: WorkbenchComposerShellProps) {
                     </button>
                   </Tip>
                 ) : null}
+                {!phoneLayout ? <BrowserBrokerChip locale={locale} /> : null}
                 {!phoneLayout ? (
                   <>
                     <ComposerAccessMenu
@@ -866,6 +868,7 @@ export function WorkbenchComposerShell(p: WorkbenchComposerShellProps) {
                         "composer.modelSearchPlaceholder",
                       ),
                       modelSearchEmpty: tr("composer.modelSearchEmpty"),
+                      modelPickerHint: tr("composer.modelPickerHint"),
                       contextWindow: tr("composer.contextWindow"),
                       contextWindowOfficial: tr(
                         "composer.contextWindowOfficial",

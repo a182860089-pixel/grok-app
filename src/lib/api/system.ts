@@ -1,5 +1,6 @@
 /** API domain: system */
 
+import type { BrowserBrokerSnapshot } from "../browserBroker";
 import {
   invoke,
   isTauri,
@@ -519,5 +520,35 @@ export async function openThemeEditorWindow(): Promise<void> {
     throw new Error("openThemeEditorWindow requires desktop Tauri");
   }
   await invoke<void>("open_theme_editor_window");
+}
+
+export async function browserBrokerSnapshot(): Promise<BrowserBrokerSnapshot> {
+  if (!isDesktopHost()) {
+    return {
+      connected: false,
+      selectedId: null,
+      browserUrl: null,
+      keepAlive: false,
+      error: null,
+      targets: [],
+    };
+  }
+  return invoke<BrowserBrokerSnapshot>("browser_broker_snapshot");
+}
+
+export async function browserBrokerConnect(id: string): Promise<BrowserBrokerSnapshot> {
+  return invoke<BrowserBrokerSnapshot>("browser_broker_connect", { id });
+}
+
+export async function browserBrokerDisconnect(): Promise<BrowserBrokerSnapshot> {
+  return invoke<BrowserBrokerSnapshot>("browser_broker_disconnect");
+}
+
+export async function browserBrokerLaunchDedicated(): Promise<BrowserBrokerSnapshot> {
+  return invoke<BrowserBrokerSnapshot>("browser_broker_launch_dedicated");
+}
+
+export async function browserBrokerOpenInspect(id: string): Promise<BrowserBrokerSnapshot> {
+  return invoke<BrowserBrokerSnapshot>("browser_broker_open_inspect", { id });
 }
 
