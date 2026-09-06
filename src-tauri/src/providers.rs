@@ -1402,6 +1402,39 @@ pub fn active_provider_append_prompt() -> Option<String> {
         .and_then(|p| p.append_prompt)
 }
 
+/// Whether `[model.<provider_id>]` is allowed to send `catalog_id` on the wire.
+///
+/// Uses the App-managed `app_models` catalog when present. The live TOML
+/// `model =` field is **not** enough — a stale write (`relay.model = gpt-5.5`)
+/// must not keep claiming a sibling channel's id.
+pub fn channel_owns_catalog_model(provider_id: &str, catalog_id: &str) -> bool {
+    let pid = provider_id.trim();
+    let catalog = catalog_id.trim();
+    if pid.is_empty() || catalog.is_empty() {
+        return false;
+    }
+    if pid.eq_ignore_ascii_case(catalog) {
+        return true;
+    }
+    let Ok(list) = list_custom_providers() else {
+        return false;
+    };
+    let Some(p) = list.providers.iter().find(|p| p.id == pid) else {
+        return false;
+    };
+    channel_entry_owns_catalog_model(p, catalog)
+}
+
+fn channel_entry_owns_catalog_model(p: &CustomProvider, catalog: &str) -> bool {
+    if p.id == catalog {
+        return true;
+    }
+    if !p.models.is_empty() {
+        return p.models.iter().any(|m| m.id == catalog);
+    }
+    p.model == catalog
+}
+
 /// Owning `[model.<id>]` section for a composer / `app_models[].id` catalog id.
 ///
 /// Used when the App picker stores the request-body id (e.g. `qwen3.8-27b`)
@@ -1419,11 +1452,27 @@ pub fn custom_provider_id_for_catalog_model(catalog_id: &str) -> Option<String> 
         if p.id == catalog_id {
             continue;
         }
-        if p.model == catalog_id || p.models.iter().any(|m| m.id == catalog_id) {
+        if channel_entry_owns_catalog_model(p, catalog_id) {
             return Some(p.id.clone());
         }
     }
     None
+}
+
+/// When `provider_id` is a custom channel that does not own `catalog_id`,
+/// return the channel that does. Official stays official (`None`).
+pub fn remap_custom_provider_for_catalog_model(
+    provider_id: &str,
+    catalog_id: &str,
+) -> Option<String> {
+    let pid = provider_id.trim();
+    if pid.is_empty() || pid.eq_ignore_ascii_case("official") {
+        return None;
+    }
+    if channel_owns_catalog_model(pid, catalog_id) {
+        return None;
+    }
+    custom_provider_id_for_catalog_model(catalog_id).filter(|owner| owner != pid)
 }
 
 /// Model flag for `grok agent --model` and ACP `session/set_model`.
@@ -1481,6 +1530,15 @@ pub fn set_custom_provider_request_model(
     let pid = provider_id.trim();
     let catalog = catalog_id.trim();
     if pid.is_empty() || catalog.is_empty() {
+        return Ok(false);
+    }
+    if !channel_owns_catalog_model(pid, catalog) {
+        tracing::warn!(
+            target: "providers",
+            provider = %pid,
+            model = %catalog,
+            "refusing to write foreign catalog id onto custom section"
+        );
         return Ok(false);
     }
     let _ = ensure_agent_home()?;
@@ -3767,6 +3825,11 @@ context_window = "1000000"
             custom_provider_id_for_catalog_model("qwen3.8-27b").as_deref(),
             Some("qwen38-local")
         );
+        assert!(channel_owns_catalog_model(
+            "qwen38-local",
+            "qwen3.8-27b"
+        ));
+        assert!(!channel_owns_catalog_model("qwen38-local", "gpt-5.5"));
         assert_eq!(agent_spawn_model_id("qwen3.8-27b"), "qwen38-local");
         // Official catalog ids must not remap through a relay that also lists them.
         assert_eq!(agent_spawn_model_id("grok-4.6"), "grok-4.6");
@@ -3940,6 +4003,88 @@ context_window = "1000000"
         let same = set_section_assignment(&next, "gpt", "model", "gpt-5.5").unwrap();
         assert_eq!(same, next);
         assert!(set_section_assignment(src, "missing", "model", "x").is_none());
+    }
+
+    #[test]
+    fn request_model_write_refuses_foreign_catalog_id() {
+        let _lock = crate::paths::APP_HOME_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = std::env::temp_dir().join(format!(
+            "grok-app-foreign-model-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let previous_home = std::env::var("GROK_APP_HOME").ok();
+        std::env::set_var("GROK_APP_HOME", &home);
+        let _ = ensure_agent_home();
+
+        upsert_custom_provider(UpsertProviderInput {
+            id: "relay".into(),
+            model: "grok-4.6".into(),
+            base_url: "https://kedaya.example/v1".into(),
+            name: Some("relay".into()),
+            api_key: Some("sk-relay".into()),
+            api_backend: Some("responses".into()),
+            provider_mode: Some(PROVIDER_MODE_GENERIC.into()),
+            set_as_default: Some(true),
+            create_only: Some(true),
+            models: Some(vec![
+                ProviderModelEntry::named("grok-4.6", "grok-4.6"),
+                ProviderModelEntry::named("grok-4.5", "grok-4.5"),
+            ]),
+            efforts: None,
+            context_window: None,
+            base_url_full_path: None,
+            append_prompt: None,
+            supports_vision: None,
+            extra_headers: None,
+        })
+        .expect("relay");
+        upsert_custom_provider(UpsertProviderInput {
+            id: "gpt".into(),
+            model: "gpt-6-astra".into(),
+            base_url: "https://luming.example/v1".into(),
+            name: Some("gpt".into()),
+            api_key: Some("sk-gpt".into()),
+            api_backend: Some("responses".into()),
+            provider_mode: Some(PROVIDER_MODE_GENERIC.into()),
+            set_as_default: Some(false),
+            create_only: Some(true),
+            models: Some(vec![
+                ProviderModelEntry::named("gpt-5.5", "gpt-5.5"),
+                ProviderModelEntry::named("gpt-6-astra", "gpt-6-astra"),
+            ]),
+            efforts: None,
+            context_window: None,
+            base_url_full_path: None,
+            append_prompt: None,
+            supports_vision: None,
+            extra_headers: None,
+        })
+        .expect("gpt");
+
+        assert!(!channel_owns_catalog_model("relay", "gpt-5.5"));
+        assert_eq!(
+            remap_custom_provider_for_catalog_model("relay", "gpt-5.5").as_deref(),
+            Some("gpt")
+        );
+        assert!(
+            !set_custom_provider_request_model("relay", "gpt-5.5").expect("refuse")
+        );
+        let text = std::fs::read_to_string(agent_config_toml()).unwrap();
+        assert!(
+            text.contains("model = \"grok-4.6\""),
+            "relay must keep grok-4.6:\n{text}"
+        );
+        assert!(set_custom_provider_request_model("gpt", "gpt-5.5").expect("own"));
+        let text = std::fs::read_to_string(agent_config_toml()).unwrap();
+        assert!(text.contains("model = \"gpt-5.5\""));
+
+        match previous_home {
+            Some(value) => std::env::set_var("GROK_APP_HOME", value),
+            None => std::env::remove_var("GROK_APP_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

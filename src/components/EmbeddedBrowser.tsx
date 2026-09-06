@@ -789,6 +789,7 @@ export function EmbeddedBrowser({
     if (!webviewRef.current) return;
 
     let cancelled = false;
+    let verifyTimer = 0;
     // Chrome progress only — leave native webview painted (no hide/show).
     markPageLoading(true);
     void (async () => {
@@ -798,6 +799,29 @@ export function EmbeddedBrowser({
         currentUrlRef.current = target;
         setError(null);
         scheduleDownloadHookInject();
+        // WebView2 can accept navigate() while staying on about:blank. Retry
+        // once if the live location never leaves the empty document.
+        if (!/^about:/i.test(target)) {
+          verifyTimer = window.setTimeout(() => {
+            if (cancelled) return;
+            void sideBrowserEval(
+              webviewLabel,
+              "(function(){try{return String(location.href||'')}catch(e){return ''}})()",
+            )
+              .then((raw) => {
+                const href = String(raw || "")
+                  .replace(/^"|"$/g, "")
+                  .trim()
+                  .toLowerCase();
+                if (cancelled) return;
+                if (href && href !== "about:blank" && !href.startsWith("about:")) {
+                  return;
+                }
+                return sideBrowserNavigate(webviewLabel, target);
+              })
+              .catch(() => undefined);
+          }, 1600);
+        }
       } catch (e) {
         if (!cancelled) {
           console.error("[EmbeddedBrowser] navigate failed", e);
@@ -808,6 +832,7 @@ export function EmbeddedBrowser({
     })();
     return () => {
       cancelled = true;
+      window.clearTimeout(verifyTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, ready, webviewLabel]);

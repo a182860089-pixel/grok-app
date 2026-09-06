@@ -3122,13 +3122,31 @@ pub fn stamp_session_model_route(
     }
     let sid = sid.to_string();
     let model = model_id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    let provider = crate::providers::normalize_session_provider_id(provider_id)
+    let mut provider = crate::providers::normalize_session_provider_id(provider_id)
         .or_else(|| {
             provider_id
                 .map(str::trim)
                 .filter(|s| s.eq_ignore_ascii_case("official"))
                 .map(|_| "official".to_string())
         });
+    if let Some(mid) = model.as_deref() {
+        match provider.as_deref() {
+            Some(pid) if !pid.eq_ignore_ascii_case("official") => {
+                if let Some(owner) =
+                    crate::providers::remap_custom_provider_for_catalog_model(pid, mid)
+                {
+                    provider = Some(owner);
+                }
+            }
+            _ => {
+                if let Some(owner) =
+                    crate::providers::custom_provider_id_for_catalog_model(mid)
+                {
+                    provider = Some(owner);
+                }
+            }
+        }
+    }
     let _ = update_sessions_index(move |list| {
         let Some(sess) = list.iter_mut().find(|s| s.id == sid) else {
             return Ok(());

@@ -614,7 +614,21 @@ impl SessionManager {
         let Some(session_id) = session_id.map(str::trim).filter(|s| !s.is_empty()) else {
             return Ok(());
         };
-        let next_route = crate::providers::route_from_provider_id(provider_id.as_deref());
+        let next_route = {
+            let requested = crate::providers::route_from_provider_id(provider_id.as_deref());
+            match &requested {
+                crate::providers::ActiveRoute::Custom { id } => {
+                    if let Some(owner) = crate::providers::remap_custom_provider_for_catalog_model(
+                        id, &model_id,
+                    ) {
+                        crate::providers::ActiveRoute::Custom { id: owner }
+                    } else {
+                        requested
+                    }
+                }
+                crate::providers::ActiveRoute::Official => requested,
+            }
+        };
         let agent_model = crate::providers::agent_spawn_model_id_for(&model_id, &next_route);
         let next_custom = matches!(next_route, crate::providers::ActiveRoute::Custom { .. });
         let next_provider_label = match &next_route {

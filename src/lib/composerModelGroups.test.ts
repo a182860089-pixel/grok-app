@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildComposerModelGroups,
+  customProviderIdForCatalogModel,
   filterComposerModelGroups,
   isComposerModelEntryActive,
+  resolveComposerModelPick,
   type ComposerModelEntry,
 } from "./composerModelGroups";
 import type { ModelOption } from "./grokCatalog";
@@ -76,6 +78,93 @@ describe("buildComposerModelGroups", () => {
       title: "llama3",
       subtitle: undefined,
     });
+  });
+
+  it("keeps official grok ids official even if a relay lists them", () => {
+    const groups = buildComposerModelGroups({
+      officialModels: [
+        { id: "grok-4.6", label: "Grok 4.6" },
+        { id: "gpt-5.5", label: "GPT-5.5" },
+      ],
+      providers: [
+        {
+          id: "relay",
+          name: "Custom relay",
+          model: "grok-4.6",
+          models: [
+            { id: "grok-4.6", name: "grok-4.6" },
+            { id: "grok-4.5", name: "grok-4.5" },
+          ],
+        },
+        {
+          id: "gpt",
+          name: "gpt",
+          model: "gpt-5.5",
+          models: [{ id: "gpt-5.5", name: "gpt-5.5" }],
+        },
+      ],
+      officialGroupTitle: "Official",
+    });
+    expect(groups[0].entries.map((e) => e.pick)).toEqual([
+      { kind: "official", modelId: "grok-4.6" },
+    ]);
+    expect(customProviderIdForCatalogModel(providers, "gpt-5.5")).toBeUndefined();
+    const gptOwner = customProviderIdForCatalogModel(
+      [
+        {
+          id: "gpt",
+          name: "gpt",
+          model: "gpt-5.5",
+          models: [{ id: "gpt-5.5", name: "gpt-5.5" }],
+        },
+      ],
+      "gpt-5.5",
+    );
+    expect(gptOwner).toBe("gpt");
+  });
+
+  it("resolves a GPT catalog id onto the owning custom channel", () => {
+    const gptProviders = [
+      {
+        id: "relay",
+        name: "relay",
+        model: "grok-4.6",
+        models: [
+          { id: "grok-4.6", name: "grok-4.6" },
+          { id: "grok-4.5", name: "grok-4.5" },
+        ],
+      },
+      {
+        id: "gpt",
+        name: "gpt",
+        model: "gpt-5.5",
+        models: [{ id: "gpt-5.5", name: "gpt-5.5" }],
+      },
+    ];
+    expect(
+      resolveComposerModelPick(
+        { kind: "official", modelId: "gpt-5.5" },
+        gptProviders,
+      ),
+    ).toEqual({ kind: "custom", providerId: "gpt", modelId: "gpt-5.5" });
+    expect(
+      resolveComposerModelPick(
+        { kind: "custom", providerId: "relay", modelId: "gpt-5.5" },
+        gptProviders,
+      ),
+    ).toEqual({ kind: "custom", providerId: "gpt", modelId: "gpt-5.5" });
+    expect(
+      resolveComposerModelPick(
+        { kind: "official", modelId: "grok-4.6" },
+        gptProviders,
+      ),
+    ).toEqual({ kind: "official", modelId: "grok-4.6" });
+    expect(
+      resolveComposerModelPick(
+        { kind: "custom", providerId: "relay", modelId: "grok-4.6" },
+        gptProviders,
+      ),
+    ).toEqual({ kind: "custom", providerId: "relay", modelId: "grok-4.6" });
   });
 
   it("omits provider groups when providers empty", () => {

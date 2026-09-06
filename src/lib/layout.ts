@@ -46,6 +46,12 @@ export const ASIDE_CHROME_CONTENT_MIN = 280;
 export const ASIDE_WIDTH_MIN = 400;
 
 /**
+ * Desired width below this (during drag or on release) → auto-collapse.
+ * Matches the left rail: never paint a crushed pane, snap closed instead.
+ */
+export const ASIDE_COLLAPSE_THRESHOLD = ASIDE_WIDTH_MIN;
+
+/**
  * Historical soft comfort width for the right pane. **Not a hard max** —
  * aside may grow with the window as long as chat keeps
  * {@link MAIN_CHAT_MIN_WIDTH}. Prefer {@link asideWidthMax} for the real cap.
@@ -263,7 +269,32 @@ export function liveAsideDragWidth(
   if (max < min) return Math.max(0, max);
   if (!Number.isFinite(w)) return DEFAULT_LAYOUT.asideWidth;
   if (w <= max && w >= min) return Math.round(w);
-  return Math.round(liveDragWidth(w, min, max, { bandMin: true }));
+  if (w > max) return Math.round(liveDragWidth(w, min, max));
+  return min;
+}
+
+export type AsideDragEndResult =
+  | { action: "collapse"; asideWidth: number }
+  | { action: "open"; asideWidth: number };
+
+/**
+ * Resolve a right-pane drag sample. Below chrome min → close; keep last
+ * open width so reopen is not crushed to the floor.
+ */
+export function resolveAsideDragEnd(
+  w: number,
+  opts?: AsideClampOpts,
+  lastOpenWidth?: number,
+): AsideDragEndResult {
+  const raw = Number.isFinite(w) ? Math.round(w) : DEFAULT_LAYOUT.asideWidth;
+  const min = asideChromeSafeMin(opts);
+  if (raw < min) {
+    const kept = Number.isFinite(lastOpenWidth)
+      ? Math.max(ASIDE_WIDTH_MIN, Math.round(lastOpenWidth as number))
+      : Math.max(ASIDE_WIDTH_MIN, min);
+    return { action: "collapse", asideWidth: kept };
+  }
+  return { action: "open", asideWidth: clampAsideWidth(raw, opts) };
 }
 
 /**

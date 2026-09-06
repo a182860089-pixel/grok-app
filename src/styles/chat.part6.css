@@ -563,6 +563,7 @@
 
 .aside.is-resizing {
   transition: none;
+  user-select: none;
 }
 
 .workbench--aside-motion
@@ -622,11 +623,11 @@
 
 .aside-resizer {
   position: absolute;
-  /* Straddle the border: half in main (draggable), half over aside chrome */
-  left: -4px;
+  /* Match .sidebar-resizer: 5px hit, 2px hairline on the seam */
+  left: -2px;
   top: 0;
   bottom: 0;
-  width: 8px;
+  width: 5px;
   z-index: 6;
   cursor: col-resize;
   touch-action: none;
@@ -635,11 +636,10 @@
 .aside-resizer::after {
   content: "";
   position: absolute;
-  /* Center of 8px handle ≈ border-left of aside */
-  left: 4px;
+  left: 1px;
   top: 0;
   bottom: 0;
-  width: 1px;
+  width: 2px;
   background: transparent;
   transition: background 120ms ease;
   pointer-events: none;
@@ -648,6 +648,10 @@
 .aside-resizer:hover::after,
 .aside.is-resizing .aside-resizer::after {
   background: var(--border-focus, #6b8cff);
+}
+
+.aside.is-resizing .aside-resizer::after {
+  transition: none;
 }
 
 .aside__inner {

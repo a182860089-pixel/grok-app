@@ -69,6 +69,12 @@ describe("isAsideWebviewSuppressed", () => {
     ).toBe(true);
     expect(
       isAsideWebviewSuppressed({
+        classList: { contains: (n) => n === "is-resizing" },
+        getAttribute: () => null,
+      }),
+    ).toBe(true);
+    expect(
+      isAsideWebviewSuppressed({
         classList: { contains: () => false },
         getAttribute: () => null,
       }),

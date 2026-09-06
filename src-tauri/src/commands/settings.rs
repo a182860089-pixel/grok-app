@@ -359,6 +359,22 @@ pub async fn composer_prefs_set(
         store::resolve_composer_prefs(project_id.as_deref(), session_id.as_deref()).effort
     });
 
+    let provider_id = match (provider_id.as_deref(), model_id.as_deref()) {
+        (Some(pid), Some(mid))
+            if !pid.eq_ignore_ascii_case("official") =>
+        {
+            crate::providers::remap_custom_provider_for_catalog_model(pid, mid)
+                .or_else(|| Some(pid.to_string()))
+        }
+        (Some(pid), Some(mid)) if pid.eq_ignore_ascii_case("official") => {
+            crate::providers::custom_provider_id_for_catalog_model(mid)
+                .or_else(|| Some("official".into()))
+        }
+        (None, Some(mid)) => crate::providers::custom_provider_id_for_catalog_model(mid),
+        (Some(pid), _) => Some(pid.to_string()),
+        (None, None) => None,
+    };
+
     let prefs = store::save_composer_prefs_with_provider(
         project_id.as_deref(),
         session_id.as_deref(),

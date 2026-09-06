@@ -575,7 +575,10 @@ import {
   shouldAutoApplyAutomationFence,
 } from "@/lib/automationSetup";
 
-import type { ComposerModelPick } from "@/lib/composerModelGroups";
+import {
+  resolveComposerModelPick,
+  type ComposerModelPick,
+} from "@/lib/composerModelGroups";
 import {
   resolveProviderBrandId,
 } from "@/lib/providerPresets";
@@ -9827,12 +9830,13 @@ export function AppWorkbench() {
       if (modelPickBusy) return;
       setModelPickBusy(true);
       try {
-        if (pick.kind === "official") {
-          if (!isValidModelId(pick.modelId, availableModels)) return;
-          setModelId(pick.modelId);
+        const resolved = resolveComposerModelPick(pick, customProviders);
+        if (resolved.kind === "official") {
+          if (!isValidModelId(resolved.modelId, availableModels)) return;
+          setModelId(resolved.modelId);
           setSessionProviderId("official");
           const targetOfficial = effortCatalogForRoute({
-            model: findModel(pick.modelId, availableModels),
+            model: findModel(resolved.modelId, availableModels),
           });
           const clampedOfficial = mapEffortToTargetCatalog(
             effort,
@@ -9843,7 +9847,7 @@ export function AppWorkbench() {
           const officialPrefs: Parameters<typeof api.composerPrefsSet>[0] = {
             projectId: activeProject?.id ?? null,
             sessionId: session.sessionId ?? null,
-            modelId: pick.modelId,
+            modelId: resolved.modelId,
             providerId: "official",
           };
           // Unchanged effort must not ride along — Host would retune / respawn
@@ -9855,7 +9859,7 @@ export function AppWorkbench() {
         } else {
           if (!api.isTauri()) return;
           const provider = customProviders.find(
-            (p) => p.id === pick.providerId,
+            (p) => p.id === resolved.providerId,
           );
           if (!provider) {
             showToast(tr("prov.err.unknownProvider"), 4000);
@@ -9865,16 +9869,16 @@ export function AppWorkbench() {
             provider.models?.length
               ? provider.models
               : [{ id: provider.model, name: provider.model }];
-          const catalog = models.some((m) => m.id === pick.modelId)
+          const catalog = models.some((m) => m.id === resolved.modelId)
             ? models
-            : [...models, { id: pick.modelId, name: pick.modelId }];
+            : [...models, { id: resolved.modelId, name: resolved.modelId }];
           const appliedLive = materializeActiveModelChannel({
             provider,
-            modelId: pick.modelId,
+            modelId: resolved.modelId,
             models: catalog,
           });
-          setModelId(pick.modelId);
-          setSessionProviderId(pick.providerId);
+          setModelId(resolved.modelId);
+          setSessionProviderId(resolved.providerId);
           const nextEfforts =
             effortOptionsFromProvider(appliedLive.efforts) ?? GROK_BUILD_EFFORTS;
           const clampedCustom = mapEffortToTargetCatalog(
@@ -9886,8 +9890,8 @@ export function AppWorkbench() {
           const customPrefs: Parameters<typeof api.composerPrefsSet>[0] = {
             projectId: activeProject?.id ?? null,
             sessionId: session.sessionId ?? null,
-            modelId: pick.modelId,
-            providerId: pick.providerId,
+            modelId: resolved.modelId,
+            providerId: resolved.providerId,
           };
           if (clampedCustom !== effort) customPrefs.effort = clampedCustom;
           void api

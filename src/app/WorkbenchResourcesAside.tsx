@@ -39,7 +39,7 @@ export type WorkbenchResourcesAsideProps = {
   resizingAside: boolean;
   asideOpenW: number;
   asidePaint: number;
-  beginAsideResize: (width: number) => void;
+  beginAsideResize: (clientX: number, width: number) => void;
   effectiveProjectPath: string | null;
   sshAlias?: string | null;
   projectName: string;
@@ -197,7 +197,13 @@ export function WorkbenchResourcesAside(props: WorkbenchResourcesAsideProps) {
           aria-label={t("resources.resizeFilesPane")}
           onPointerDown={(e) => {
             e.preventDefault();
-            beginAsideResize(asideMin);
+            e.stopPropagation();
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId);
+            } catch {
+              /* capture is best-effort */
+            }
+            beginAsideResize(e.clientX, asideMin);
           }}
         />
       )}

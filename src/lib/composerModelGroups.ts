@@ -33,6 +33,12 @@ export type ComposerProviderInput = {
   models?: ComposerProviderModelInput[];
 };
 
+/** Official Grok catalog ids never leave the official group, even if a relay lists them. */
+export function isReservedOfficialCatalogId(id: string): boolean {
+  const t = id.trim();
+  return t === "grok-4.6" || t === "grok-4.5" || t === "grok";
+}
+
 function modelsForProvider(
   p: ComposerProviderInput,
 ): ComposerProviderModelInput[] {
@@ -49,19 +55,82 @@ function modelsForProvider(
   return [{ id, name: id }];
 }
 
+/** Owning custom channel for a request-body model id, if any. */
+export function customProviderIdForCatalogModel(
+  providers: ComposerProviderInput[],
+  catalogId: string,
+): string | undefined {
+  const id = catalogId.trim();
+  if (!id || isReservedOfficialCatalogId(id)) return undefined;
+  for (const p of providers) {
+    if (modelsForProvider(p).some((m) => m.id === id)) return p.id;
+  }
+  return undefined;
+}
+
+function providerOwnsCatalogModel(
+  provider: ComposerProviderInput,
+  catalogId: string,
+): boolean {
+  const id = catalogId.trim();
+  if (!id) return false;
+  if (provider.id === id) return true;
+  return modelsForProvider(provider).some((m) => m.id === id);
+}
+
+/**
+ * Bind a picker row to the channel that actually owns the catalog id.
+ * Official Grok ids stay official even when a relay also lists them.
+ */
+export function resolveComposerModelPick(
+  pick: ComposerModelPick,
+  providers: ComposerProviderInput[],
+): ComposerModelPick {
+  const modelId = pick.modelId.trim();
+  if (!modelId) return pick;
+  if (isReservedOfficialCatalogId(modelId)) {
+    return pick.kind === "official"
+      ? pick
+      : providers.some((p) => p.id === pick.providerId)
+        ? pick
+        : { kind: "official", modelId };
+  }
+  const owner = customProviderIdForCatalogModel(providers, modelId);
+  if (pick.kind === "official") {
+    return owner
+      ? { kind: "custom", providerId: owner, modelId }
+      : pick;
+  }
+  if (owner && owner !== pick.providerId) {
+    return { kind: "custom", providerId: owner, modelId };
+  }
+  const current = providers.find((p) => p.id === pick.providerId);
+  if (current && providerOwnsCatalogModel(current, modelId)) {
+    return pick;
+  }
+  if (owner) {
+    return { kind: "custom", providerId: owner, modelId };
+  }
+  return { kind: "official", modelId };
+}
+
 export function buildComposerModelGroups(opts: {
   officialModels: ModelOption[];
   providers: ComposerProviderInput[];
   officialGroupTitle: string;
 }): ComposerModelGroup[] {
   const groups: ComposerModelGroup[] = [];
-  const officialEntries: ComposerModelEntry[] = opts.officialModels.map(
-    (m) => ({
+  const officialEntries: ComposerModelEntry[] = opts.officialModels
+    .filter(
+      (m) =>
+        isReservedOfficialCatalogId(m.id) ||
+        !customProviderIdForCatalogModel(opts.providers, m.id),
+    )
+    .map((m) => ({
       key: `official:${m.id}`,
       pick: { kind: "official" as const, modelId: m.id },
       title: m.label || m.id,
-    }),
-  );
+    }));
   if (officialEntries.length > 0) {
     groups.push({
       key: "official",

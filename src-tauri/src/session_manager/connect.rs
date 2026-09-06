@@ -44,6 +44,12 @@ fn session_spawn_route(
     meta: &store::SessionMeta,
     prefs: &store::ComposerPrefs,
 ) -> crate::acp_client::SessionSpawnRoute {
+    let catalog = meta
+        .model_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| prefs.model_id.trim());
     let explicit = meta
         .provider_id
         .as_deref()
@@ -56,20 +62,22 @@ fn session_spawn_route(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
         });
+    let custom = |id: &str| {
+        let provider_id =
+            crate::providers::remap_custom_provider_for_catalog_model(id, catalog)
+                .unwrap_or_else(|| id.to_string());
+        crate::acp_client::SessionSpawnRoute::Custom { provider_id }
+    };
     match explicit {
         Some(id) if id.eq_ignore_ascii_case("official") => {
             crate::acp_client::SessionSpawnRoute::Official
         }
-        Some(id) => crate::acp_client::SessionSpawnRoute::Custom {
-            provider_id: id.to_string(),
-        },
+        Some(id) => custom(id),
         None => match crate::providers::active_route() {
             crate::providers::ActiveRoute::Official => {
                 crate::acp_client::SessionSpawnRoute::Official
             }
-            crate::providers::ActiveRoute::Custom { id } => {
-                crate::acp_client::SessionSpawnRoute::Custom { provider_id: id }
-            }
+            crate::providers::ActiveRoute::Custom { id } => custom(&id),
         },
     }
 }
@@ -409,13 +417,13 @@ impl SessionManager {
             store::resolve_composer_prefs(meta.project_id.as_deref(), Some(meta.id.as_str()));
         let policy = PermissionPolicy::parse(&prefs.permission_policy);
         let session_route = session_spawn_route(&meta, &prefs);
-        if meta.provider_id.as_deref().map(str::trim).is_none_or(|s| s.is_empty()) {
-            let stamped = match &session_route {
-                crate::acp_client::SessionSpawnRoute::Official => "official".to_string(),
-                crate::acp_client::SessionSpawnRoute::Custom { provider_id } => {
-                    provider_id.clone()
-                }
-            };
+        let stamped = match &session_route {
+            crate::acp_client::SessionSpawnRoute::Official => "official".to_string(),
+            crate::acp_client::SessionSpawnRoute::Custom { provider_id } => {
+                provider_id.clone()
+            }
+        };
+        if meta.provider_id.as_deref() != Some(stamped.as_str()) {
             meta.provider_id = Some(stamped);
             let _ = store::update_session_meta(&meta);
         }

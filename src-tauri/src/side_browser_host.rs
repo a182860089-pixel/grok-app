@@ -378,7 +378,7 @@ pub fn create(
     // users click the page when they want to type there.
     // First document load starts immediately after create.
     emit_page_load(app, "started", &label, &url);
-    let builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(parsed))
+    let builder = WebviewBuilder::new(label.clone(), WebviewUrl::External(parsed.clone()))
         .accept_first_mouse(true)
         .focused(false)
         // Keep the child on Wry's default WebView2 environment arguments.
@@ -696,6 +696,21 @@ pub fn create(
         )
         .map_err(|e| format!("side browser create: {e}"))?;
 
+    if let Some(wv) = app.get_webview(&label) {
+        let _ = wv.show();
+    }
+
+    #[cfg(windows)]
+    if let Some(host) = app.get_webview_window(win_label) {
+        crate::win_shell::raise_side_browser_webviews(&host);
+    }
+
+    // Empty tabs stay on about:blank. Finished often never re-fires for that
+    // document, which left the chrome spinner running over a white pane.
+    if parsed.scheme() == "about" {
+        emit_page_load(app, "finished", &label, &url);
+    }
+
     tracing::info!(
         target: "side_browser",
         %webview_label,
@@ -903,10 +918,25 @@ pub fn list(app: &AppHandle) -> Result<Vec<SideBrowserInfo>, String> {
 pub fn navigate(app: &AppHandle, label: String, url: String) -> Result<(), String> {
     let parsed = validate_url(&url)?;
     let wv = get_side_webview(app, &label)?;
+    tracing::info!(
+        target: "side_browser",
+        webview_label = %label,
+        url = %url,
+        "navigating side browser"
+    );
     // Optimistic start so the UI can paint a progress bar before WK/WebView2
     // fires PageLoadEvent::Started (can lag on slow DNS / first byte).
     emit_page_load(app, "started", &label, &url);
-    wv.navigate(parsed).map_err(|e| format!("navigate: {e}"))
+    wv.navigate(parsed.clone())
+        .map_err(|e| format!("navigate: {e}"))?;
+    if parsed.scheme() == "about" {
+        emit_page_load(app, "finished", &label, &url);
+    }
+    #[cfg(windows)]
+    if let Some(host) = app.get_webview_window(wv.window().label()) {
+        crate::win_shell::raise_side_browser_webviews(&host);
+    }
+    Ok(())
 }
 
 pub fn reload(app: &AppHandle, label: String) -> Result<(), String> {

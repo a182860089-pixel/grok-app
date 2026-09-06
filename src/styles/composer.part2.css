@@ -259,9 +259,37 @@
   white-space: nowrap;
 }
 
+.prov-item__actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 2px;
+  margin-right: 8px;
+}
+
+.prov-item__ping {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary) !important;
+  border-color: transparent !important;
+  transition: transform 100ms ease-out, color 120ms ease;
+}
+
+.prov-item__ping:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.prov-item__ping.is-ok {
+  color: var(--success) !important;
+}
+
+.prov-item__ping.is-err {
+  color: var(--danger, #e24a4a) !important;
+}
+
 .prov-item__use {
   flex-shrink: 0;
-  margin-right: 8px;
   color: var(--accent) !important;
   border-color: transparent !important;
 }

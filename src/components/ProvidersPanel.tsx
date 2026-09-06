@@ -356,6 +356,13 @@ export function ProvidersPanel({
     Record<string, { state: "idle" | "testing" | "ok" | "error"; reason?: string }>
   >({});
   const modelTestEpochRef = useRef(0);
+  /** Per-channel reachability probe on the left rail. */
+  const [channelPing, setChannelPing] = useState<
+    Record<
+      string,
+      { state: "idle" | "testing" | "ok" | "error"; reason?: string; ms?: number }
+    >
+  >({});
   /** Draft row for manually adding a model. */
   const [draftModelId, setDraftModelId] = useState("");
   const [draftModelName, setDraftModelName] = useState("");
@@ -1036,6 +1043,53 @@ export function ProvidersPanel({
     }
   };
 
+  const pingChannel = async (providerId: string, e?: MouseEvent) => {
+    e?.stopPropagation();
+    e?.preventDefault();
+    const id = providerId.trim();
+    if (!id) return;
+    if (!api.isTauri()) {
+      const msg = tr(providerPingErrorMessageKey("host_only") as MessageKey);
+      setChannelPing((s) => ({ ...s, [id]: { state: "error", reason: msg } }));
+      onToast?.(msg, 4000);
+      return;
+    }
+    setChannelPing((s) => ({ ...s, [id]: { state: "testing" } }));
+    try {
+      const r = await api.providersPing({ providerId: id });
+      if (r.ok) {
+        setChannelPing((s) => ({
+          ...s,
+          [id]: { state: "ok", ms: r.latencyMs },
+        }));
+        onToast?.(
+          tr("prov.ping.okMs", { ms: String(Math.round(r.latencyMs)) }),
+          2800,
+        );
+        return;
+      }
+      const kind = classifyProviderPingError(r.error ?? r.status);
+      const key = providerPingErrorMessageKey(kind) as MessageKey;
+      const reason =
+        kind === "other"
+          ? tr("prov.ping.err.other", {
+              detail: r.error?.trim() || String(r.status ?? "error"),
+            })
+          : tr(key);
+      setChannelPing((s) => ({ ...s, [id]: { state: "error", reason } }));
+      onToast?.(reason, 4000);
+    } catch (err) {
+      const kind = classifyProviderPingError(err);
+      const key = providerPingErrorMessageKey(kind) as MessageKey;
+      const reason =
+        kind === "other"
+          ? tr("prov.ping.err.other", { detail: String(err) })
+          : tr(key);
+      setChannelPing((s) => ({ ...s, [id]: { state: "error", reason } }));
+      onToast?.(reason, 4000);
+    }
+  };
+
   const fetchModels = async () => {
     if (!form.baseUrl.trim()) {
       onToast?.(tr("prov.err.needBase"), 3200);
@@ -1345,6 +1399,19 @@ export function ProvidersPanel({
                 providerId: p.id,
                 baseUrl: p.baseUrl,
               });
+              const ping = channelPing[p.id];
+              const pingTesting = ping?.state === "testing";
+              const pingOk = ping?.state === "ok";
+              const pingErr = ping?.state === "error";
+              const pingLabel = pingTesting
+                ? tr("prov.ping.testing")
+                : pingOk
+                  ? ping.ms != null
+                    ? tr("prov.ping.okMs", { ms: String(Math.round(ping.ms)) })
+                    : tr("prov.ping.ok")
+                  : pingErr
+                    ? ping.reason || tr("prov.testModel.failed")
+                    : tr("prov.ping.test");
               return (
                 <div
                   key={p.id}
@@ -1381,24 +1448,48 @@ export function ProvidersPanel({
                       </span>
                     </span>
                   </button>
-                  {!active ? (
-                    <button
-                      type="button"
-                      className="btn btn--ghost btn--sm prov-item__use"
-                      disabled={busy}
-                      onClick={(e) => void activateCustom(p.id, e)}
-                    >
-                      {tr("prov.useThis")}
-                    </button>
-                  ) : (
-                    <span
-                      className="prov-item__using"
-                      title={tr("prov.active")}
-                      aria-label={tr("prov.active")}
-                    >
-                      <IconCheck size={14} />
-                    </span>
-                  )}
+                  <div className="prov-item__actions">
+                    <Tip label={pingLabel}>
+                      <button
+                        type="button"
+                        className={
+                          "btn btn--ghost btn--sm prov-item__ping" +
+                          (pingOk ? " is-ok" : "") +
+                          (pingErr ? " is-err" : "")
+                        }
+                        disabled={busy || pingTesting}
+                        aria-label={tr("prov.ping.test")}
+                        data-testid={`prov-ping-${p.id}`}
+                        onClick={(e) => void pingChannel(p.id, e)}
+                      >
+                        {pingTesting ? (
+                          tr("prov.ping.testing")
+                        ) : pingOk ? (
+                          <IconCheck size={14} />
+                        ) : (
+                          <IconPlug size={14} />
+                        )}
+                      </button>
+                    </Tip>
+                    {!active ? (
+                      <button
+                        type="button"
+                        className="btn btn--ghost btn--sm prov-item__use"
+                        disabled={busy}
+                        onClick={(e) => void activateCustom(p.id, e)}
+                      >
+                        {tr("prov.useThis")}
+                      </button>
+                    ) : (
+                      <span
+                        className="prov-item__using"
+                        title={tr("prov.active")}
+                        aria-label={tr("prov.active")}
+                      >
+                        <IconCheck size={14} />
+                      </span>
+                    )}
+                  </div>
                 </div>
               );
             })}

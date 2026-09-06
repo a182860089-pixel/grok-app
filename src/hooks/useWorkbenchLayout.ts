@@ -9,10 +9,12 @@ import {
   WINDOW_CONTROLS_INSET,
   clampAsideWidth,
   clampSidebarWidth,
+  asideChromeSafeMin,
   liveAsideDragWidth,
   liveSidebarDragWidth,
   isMirrorPhoneLayout,
   loadLayout,
+  resolveAsideDragEnd,
   resolveSidebarDragEnd,
   saveLayout,
   SIDEBAR_DEFAULT_WIDTH,
@@ -47,6 +49,7 @@ import {
   isWindowFitSuppressed,
 } from "@/lib/windowFit";
 import { isDesktopHost } from "@/lib/api";
+import { acquireNativeWebviewCover } from "@/lib/nativeWebviewCover";
 import {
   bumpPaneSplitMotion,
   isPaneSplitMotionActive,
@@ -125,6 +128,9 @@ export function useWorkbenchLayout(opts?: { onAsideClose?: () => void }) {
   const asideFitGenRef = useRef(0);
   const sidebarFitGenRef = useRef(0);
   const sidebarResizeStartRef = useRef<{ x: number; width: number } | null>(
+    null,
+  );
+  const asideResizeStartRef = useRef<{ x: number; width: number } | null>(
     null,
   );
   const liveSidebarWidthRef = useRef(
@@ -424,7 +430,8 @@ export function useWorkbenchLayout(opts?: { onAsideClose?: () => void }) {
     setResizingSidebar(true);
   }, []);
 
-  const beginAsideResize = useCallback((width: number) => {
+  const beginAsideResize = useCallback((clientX: number, width: number) => {
+    asideResizeStartRef.current = { x: clientX, width };
     liveAsideWidthRef.current = width;
     setResizingAside(true);
   }, []);
@@ -548,40 +555,125 @@ export function useWorkbenchLayout(opts?: { onAsideClose?: () => void }) {
       ...asideClampOpts(),
       viewportWidth: window.innerWidth,
     });
+    const endResizeChrome = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    const releaseCover = acquireNativeWebviewCover();
     const pane = queryWorkbenchSplitPane("aside");
     liveAsideWidthRef.current = clampAsideWidth(
       layoutRef.current.asideWidth,
       clampOpts(),
     );
     applyLiveSplitWidth(pane, liveAsideWidthRef.current);
-    const onMove = (e: PointerEvent) => {
+    let raf = 0;
+    let collapsedLive = false;
+    let lastX =
+      asideResizeStartRef.current?.x ??
+      window.innerWidth - liveAsideWidthRef.current;
+    const applyCollapseLive = () => {
+      if (collapsedLive) return;
+      collapsedLive = true;
+      const cur = layoutRef.current;
+      const kept = Math.max(
+        ASIDE_WIDTH_MIN,
+        cur.asideWidth || DEFAULT_LAYOUT.asideWidth,
+      );
+      const next = persist({
+        ...cur,
+        asideCollapsed: true,
+        asideWidth: kept,
+      });
+      layoutRef.current = next;
+      setLayout(next);
+      asideResizeStartRef.current = null;
+      setResizingAside(false);
+      endResizeChrome();
+    };
+    const applyFromClientX = (clientX: number) => {
       if (isWindowFitSuppressed()) return;
-      const desired = Math.round(window.innerWidth - e.clientX);
+      const start = asideResizeStartRef.current;
+      if (!start) return;
+      const desired = Math.round(start.width - (clientX - start.x));
+      const min = asideChromeSafeMin(clampOpts());
+      if (desired < min) {
+        applyCollapseLive();
+        return;
+      }
       const next = liveAsideDragWidth(desired, clampOpts());
       if (next === liveAsideWidthRef.current) return;
       liveAsideWidthRef.current = next;
       applyLiveSplitWidth(pane, next);
     };
+    const onMove = (e: PointerEvent) => {
+      lastX = e.clientX;
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        applyFromClientX(lastX);
+      });
+    };
     const onUp = () => {
+      if (collapsedLive) {
+        setResizingAside(false);
+        endResizeChrome();
+        return;
+      }
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+        applyFromClientX(lastX);
+      }
+      if (collapsedLive) {
+        setResizingAside(false);
+        endResizeChrome();
+        return;
+      }
+      if (!asideResizeStartRef.current && layoutRef.current.asideCollapsed) {
+        setResizingAside(false);
+        endResizeChrome();
+        return;
+      }
       setResizingAside(false);
-      const width = clampAsideWidth(liveAsideWidthRef.current, clampOpts());
-      setLayout((l) =>
-        persist({
-          ...l,
-          asideCollapsed: false,
-          asideWidth: width,
-        }),
+      asideResizeStartRef.current = null;
+      const cur = layoutRef.current;
+      if (cur.asideCollapsed) {
+        endResizeChrome();
+        return;
+      }
+      const resolved = resolveAsideDragEnd(
+        liveAsideWidthRef.current || DEFAULT_LAYOUT.asideWidth,
+        clampOpts(),
+        cur.asideWidth,
       );
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
+      setLayout(
+        persist(
+          resolved.action === "collapse"
+            ? {
+                ...cur,
+                asideCollapsed: true,
+                asideWidth: resolved.asideWidth,
+              }
+            : {
+                ...cur,
+                asideCollapsed: false,
+                asideWidth: resolved.asideWidth,
+              },
+        ),
+      );
+      endResizeChrome();
     };
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
     return () => {
+      if (raf) cancelAnimationFrame(raf);
+      releaseCover();
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
     };
   }, [asideClampOpts, resizingAside]);
 

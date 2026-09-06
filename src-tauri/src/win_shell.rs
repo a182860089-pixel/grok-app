@@ -38,10 +38,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongW, IsChild, IsWindow, IsWindowVisible, PostMessageW, RemovePropW, SendMessageW,
     SetClassLongPtrW, SetMenu, SetPropW, SetWindowLongPtrW, SetWindowLongW, SetWindowPos,
     GCLP_HICON, GCLP_HICONSM, GWLP_HWNDPARENT, GWLP_WNDPROC, GWL_EXSTYLE, GWL_STYLE, GW_CHILD,
-    GW_HWNDNEXT, GW_OWNER, HICON, HWND_NOTOPMOST, SetCursorPos, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, WA_ACTIVE, WA_CLICKACTIVE, WM_ACTIVATE, WM_APP,
-    WM_NCDESTROY, WM_SETFOCUS, WM_SETICON, WNDPROC, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
+    GW_HWNDNEXT, GW_OWNER, HICON, HWND_NOTOPMOST, HWND_TOP, SetCursorPos, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, WA_ACTIVE,
+    WA_CLICKACTIVE, WM_ACTIVATE, WM_APP, WM_NCDESTROY, WM_SETFOCUS, WM_SETICON, WNDPROC,
+    WS_EX_APPWINDOW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_MAXIMIZEBOX, WS_MINIMIZEBOX,
 };
 
 /// Call once early in process startup (before or right after creating the main window).
@@ -667,6 +667,64 @@ fn should_handle_focus_message(msg: u32, wparam: u32) -> bool {
 
 fn is_wry_webview_class(name: &str) -> bool {
     name.eq_ignore_ascii_case(WRY_WEBVIEW_CLASS)
+}
+
+/// Raise side-browser `WRY_WEBVIEW` children above the workbench WebView.
+///
+/// On Windows the main document HWND is opaque. A newly added child that stays
+/// under it looks like a blank native browser: chrome (DOM) still updates, but
+/// the page never paints. Skip the captured primary workbench child.
+pub fn raise_side_browser_webviews(window: &WebviewWindow) {
+    let Ok(parent) = window.hwnd() else {
+        return;
+    };
+    let Some(primary) = stored_primary_webview(parent) else {
+        return;
+    };
+    let children = all_wry_webview_children(parent);
+    let mut raised = 0u32;
+    unsafe {
+        for child in children {
+            if child == primary {
+                continue;
+            }
+            if SetWindowPos(
+                child,
+                Some(HWND_TOP),
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW,
+            )
+            .is_ok()
+            {
+                raised += 1;
+            }
+        }
+    }
+    if raised > 0 {
+        tracing::info!(
+            target: "side_browser",
+            raised,
+            "raised side browser webview HWND above workbench"
+        );
+    }
+}
+
+fn stored_primary_webview(parent: HWND) -> Option<HWND> {
+    unsafe {
+        let raw = GetPropW(parent, PRIMARY_WEBVIEW_PROP);
+        if raw.0.is_null() {
+            return None;
+        }
+        let child = HWND(raw.0);
+        if IsWindow(Some(child)).as_bool() && hwnd_is_wry_webview(child) {
+            Some(child)
+        } else {
+            None
+        }
+    }
 }
 
 /// Pure helper for unit tests: Alt-Tab / Show-Desktop significance rules (simplified).
