@@ -2,11 +2,18 @@
  * Per-kind body for Side Workbench (non-file kinds; files use FilesWorkspace).
  */
 
-import { useMemo } from "react";
+import { lazy, Suspense, useMemo } from "react";
 import { createT, type Locale } from "@/i18n";
 import type { SideTab } from "@/lib/sideWorkbench";
-import { BrowserTab } from "./BrowserTab";
-import { TerminalTab } from "./TerminalTab";
+
+const BrowserTab = lazy(async () => {
+  const m = await import("./BrowserTab");
+  return { default: m.BrowserTab };
+});
+const TerminalTab = lazy(async () => {
+  const m = await import("./TerminalTab");
+  return { default: m.TerminalTab };
+});
 
 export type SideTabBodyProps = {
   locale: Locale | string;
@@ -27,26 +34,30 @@ export function SideTabBody({
 
   if (tab.kind === "browser") {
     return (
-      <BrowserTab
-        locale={locale}
-        tabId={tab.id}
-        url={tab.url}
-        title={tab.title || tab.name}
-        active={active}
-        sshAlias={sshAlias}
-      />
+      <Suspense fallback={null}>
+        <BrowserTab
+          locale={locale}
+          tabId={tab.id}
+          url={tab.url}
+          title={tab.title || tab.name}
+          active={active}
+          sshAlias={sshAlias}
+        />
+      </Suspense>
     );
   }
 
   if (tab.kind === "terminal") {
     return (
-      <TerminalTab
-        locale={locale}
-        tabId={tab.id}
-        projectPath={projectPath}
-        sshAlias={sshAlias}
-        active={active}
-      />
+      <Suspense fallback={null}>
+        <TerminalTab
+          locale={locale}
+          tabId={tab.id}
+          projectPath={projectPath}
+          sshAlias={sshAlias}
+          active={active}
+        />
+      </Suspense>
     );
   }
 

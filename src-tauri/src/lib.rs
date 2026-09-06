@@ -782,21 +782,6 @@ pub fn run() {
                             );
                         }
                     }
-                    match side_browser_mcp::start(handle.clone()).await {
-                        Ok(h) => {
-                            tracing::info!(
-                                url = %h.endpoint.url,
-                                "embedded-browser mcp ready"
-                            );
-                            handle.manage(h);
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                error = %e,
-                                "embedded-browser mcp failed to start — in-app browser tools unavailable"
-                            );
-                        }
-                    }
                     match session_api::start(handle.clone(), session_mgr).await {
                         Ok(h) => {
                             tracing::info!(url = %h.url, "session api ready");

@@ -72,6 +72,8 @@ export interface SessionRow {
   updatedAt: string;
   /** Last known model on session meta (from sessions_list). */
   modelId?: string | null;
+  /** Session-owned vendor (`official` or custom provider id). */
+  providerId?: string | null;
   /** Last known effort on session meta when stored. */
   effort?: string | null;
   archived?: boolean;

@@ -19,7 +19,7 @@ use axum::{Json, Router};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 
@@ -118,6 +118,26 @@ fn random_token() -> String {
     let mut bytes = [0u8; 24];
     rand::thread_rng().fill_bytes(&mut bytes);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+static START_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+/// Start the loopback MCP once. Safe to call from connect, browser create, or boot.
+pub async fn ensure_started(app: &AppHandle) -> Result<BrowserMcpEndpoint, String> {
+    if let Some(ep) = current_endpoint() {
+        return Ok(ep);
+    }
+    let lock = START_LOCK.get_or_init(|| tokio::sync::Mutex::new(()));
+    let _g = lock.lock().await;
+    if let Some(ep) = current_endpoint() {
+        return Ok(ep);
+    }
+    let handle = start(app.clone()).await?;
+    let ep = handle.endpoint.clone();
+    if app.try_state::<BrowserMcpHandle>().is_none() {
+        app.manage(handle);
+    }
+    Ok(ep)
 }
 
 /// Bind loopback JSON-RPC and remember the ACP inject endpoint.

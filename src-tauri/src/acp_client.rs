@@ -377,10 +377,20 @@ pub struct AcpClient {
     ssh_alias: Option<String>,
 }
 
+/// Session-owned inference route for one ACP child. `None` on SpawnOptions
+/// falls back to the process-global `[models].default` (prewarm / tests).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionSpawnRoute {
+    Official,
+    Custom { provider_id: String },
+}
+
 /// Options applied at agent process start (CLI flags).
 #[derive(Debug, Clone, Default)]
 pub struct SpawnOptions {
     pub model_id: Option<String>,
+    /// When set, this child uses the session's vendor instead of global active_route.
+    pub session_route: Option<SessionSpawnRoute>,
     pub effort: Option<String>,
     /// App permission policy id (ask / accept_edits / …).
     pub permission_policy: Option<String>,
@@ -1303,18 +1313,30 @@ impl AcpClient {
         let empty_mcp_servers = opts.empty_mcp_servers;
         let home_override = opts.grok_home_override.clone();
         // Route class is process-scoped (auth material + config.toml). Official
-        // aux override home is always OIDC-side; main home follows active_route.
-        // Custom relays live only in agent-home — force that GROK_HOME even when
-        // session_data_mode=shared so third-party keys work without official login (#557).
+        // aux override home is always OIDC-side. Session-owned custom children
+        // use a sidecar GROK_HOME so they do not strip official agent-home auth.
+        // `session_route = None` keeps prewarm/tests on the global active_route.
+        let session_route = opts.session_route.clone();
         let custom_route = if home_override.is_some() {
             false
         } else {
-            matches!(
-                crate::providers::active_route(),
-                crate::providers::ActiveRoute::Custom { .. }
-            )
+            match &session_route {
+                Some(SessionSpawnRoute::Official) => false,
+                Some(SessionSpawnRoute::Custom { .. }) => true,
+                None => matches!(
+                    crate::providers::active_route(),
+                    crate::providers::ActiveRoute::Custom { .. }
+                ),
+            }
+        };
+        let custom_home = if custom_route && home_override.is_none() {
+            crate::providers::prepare_custom_inference_home().ok()
+        } else {
+            None
         };
         let grok_home = if let Some(ref h) = home_override {
+            h.clone()
+        } else if let Some(ref h) = custom_home {
             h.clone()
         } else {
             crate::paths::resolve_inference_grok_home(session_data_mode, custom_route)
@@ -1332,8 +1354,8 @@ impl AcpClient {
         } else {
             session_data_mode
         };
-        if agent_home_prep {
-            // Official → sync OIDC; custom → strip auth.json (api_key only).
+        if agent_home_prep && custom_home.is_none() {
+            // Official main home: sync OIDC. Custom sidecar already has no auth.json.
             crate::providers::prepare_route_auth_for_agent();
             if let Some(ref pol) = opts.permission_policy {
                 let _ = crate::agent_prefs::sync_permission_to_agent_profile(prep_mode, pol);
@@ -1346,7 +1368,18 @@ impl AcpClient {
         let grok_build_proxy = if ssh_alias.is_some() || home_override.is_some() {
             None
         } else {
-            crate::providers::active_grok_build_proxy_spawn(opts.model_id.as_deref().unwrap_or(""))
+            match &session_route {
+                Some(SessionSpawnRoute::Custom { provider_id }) => {
+                    crate::providers::grok_build_proxy_spawn_for(
+                        provider_id,
+                        opts.model_id.as_deref().unwrap_or(""),
+                    )
+                }
+                Some(SessionSpawnRoute::Official) => None,
+                None => crate::providers::active_grok_build_proxy_spawn(
+                    opts.model_id.as_deref().unwrap_or(""),
+                ),
+            }
         };
         let spawn_model = if ssh_alias.is_some() {
             let m = opts.model_id.as_deref().unwrap_or("").trim();
@@ -1365,7 +1398,24 @@ impl AcpClient {
                 m.to_string()
             }
         } else {
-            crate::providers::agent_spawn_model_id(opts.model_id.as_deref().unwrap_or(""))
+            let composer = opts.model_id.as_deref().unwrap_or("");
+            match &session_route {
+                Some(SessionSpawnRoute::Official) => {
+                    crate::providers::agent_spawn_model_id_for(
+                        composer,
+                        &crate::providers::ActiveRoute::Official,
+                    )
+                }
+                Some(SessionSpawnRoute::Custom { provider_id }) => {
+                    crate::providers::agent_spawn_model_id_for(
+                        composer,
+                        &crate::providers::ActiveRoute::Custom {
+                            id: provider_id.clone(),
+                        },
+                    )
+                }
+                None => crate::providers::agent_spawn_model_id(composer),
+            }
         };
 
         // Flag placement (CLI 0.2.x):

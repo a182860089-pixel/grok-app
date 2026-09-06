@@ -53,6 +53,10 @@ pub struct ComposerPrefs {
     pub scope: String,
     /// Which layer actually supplied the values (global | project | session).
     pub source: String,
+    /// Session-owned vendor: `"official"` or a custom provider section id.
+    /// Empty/None → follow the process-global active route (new chats).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
 }
 
 impl Default for ComposerPrefs {
@@ -65,6 +69,7 @@ impl Default for ComposerPrefs {
             permission_policy: "ask".into(),
             scope: "global".into(),
             source: "global".into(),
+            provider_id: None,
         }
     }
 }
@@ -246,6 +251,11 @@ pub struct SessionMeta {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub model_id: Option<String>,
+    /// Session-owned vendor (`official` or custom provider id). Independent of
+    /// the process-global `[models].default` so two chats can stay on different
+    /// providers at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
     /// Archived chats stay on disk but hide from the default tree.
     #[serde(default)]
     pub archived: bool,
@@ -2954,19 +2964,34 @@ pub fn resolve_composer_prefs(project_id: Option<&str>, session_id: Option<&str>
         })
         .unwrap_or(g_effort);
 
+    let session_provider = sess
+        .as_ref()
+        .and_then(|s| s.provider_id.clone())
+        .filter(|s| !s.trim().is_empty());
+
     let mut prefs = match scope {
         ComposerPrefsScope::Global => ComposerPrefs {
-            model_id: g_model,
+            model_id: sess
+                .as_ref()
+                .and_then(|s| s.model_id.clone())
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(g_model),
             effort,
             mode: g_mode,
             permission_policy,
             scope: scope.as_str().into(),
             source: "global".into(),
+            provider_id: session_provider.clone(),
         },
         ComposerPrefsScope::Project => {
             if let Some(p) = proj {
                 ComposerPrefs {
-                    model_id: p.model_id.filter(|s| !s.is_empty()).unwrap_or(g_model),
+                    model_id: sess
+                        .as_ref()
+                        .and_then(|s| s.model_id.clone())
+                        .filter(|s| !s.trim().is_empty())
+                        .or_else(|| p.model_id.filter(|s| !s.is_empty()))
+                        .unwrap_or(g_model),
                     effort,
                     mode: p
                         .mode
@@ -2977,15 +3002,21 @@ pub fn resolve_composer_prefs(project_id: Option<&str>, session_id: Option<&str>
                     permission_policy,
                     scope: scope.as_str().into(),
                     source: "project".into(),
+                    provider_id: session_provider.clone(),
                 }
             } else {
                 ComposerPrefs {
-                    model_id: g_model,
+                    model_id: sess
+                        .as_ref()
+                        .and_then(|s| s.model_id.clone())
+                        .filter(|s| !s.trim().is_empty())
+                        .unwrap_or(g_model),
                     effort,
                     mode: g_mode,
                     permission_policy,
                     scope: scope.as_str().into(),
                     source: "global".into(),
+                    provider_id: session_provider.clone(),
                 }
             }
         }
@@ -3011,6 +3042,7 @@ pub fn resolve_composer_prefs(project_id: Option<&str>, session_id: Option<&str>
                     permission_policy,
                     scope: scope.as_str().into(),
                     source: "session".into(),
+                    provider_id: session_provider.clone(),
                 }
             } else {
                 ComposerPrefs {
@@ -3020,6 +3052,7 @@ pub fn resolve_composer_prefs(project_id: Option<&str>, session_id: Option<&str>
                     permission_policy,
                     scope: scope.as_str().into(),
                     source: if proj.is_some() { "project" } else { "global" }.into(),
+                    provider_id: None,
                 }
             }
         }
@@ -3073,6 +3106,44 @@ fn save_effort_on_session(
     })
 }
 
+/// Persist model + vendor on the session row so two chats can keep different
+/// providers even when composer memory scope is global.
+pub fn stamp_session_model_route(
+    session_id: Option<&str>,
+    model_id: Option<&str>,
+    provider_id: Option<&str>,
+) -> Result<(), String> {
+    let Some(sid) = session_id.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(());
+    };
+    if model_id.is_none() && provider_id.is_none() {
+        return Ok(());
+    }
+    let sid = sid.to_string();
+    let model = model_id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let provider = crate::providers::normalize_session_provider_id(provider_id)
+        .or_else(|| {
+            provider_id
+                .map(str::trim)
+                .filter(|s| s.eq_ignore_ascii_case("official"))
+                .map(|_| "official".to_string())
+        });
+    let _ = update_sessions_index(move |list| {
+        let Some(sess) = list.iter_mut().find(|s| s.id == sid) else {
+            return Ok(());
+        };
+        if let Some(m) = model {
+            sess.model_id = Some(m);
+        }
+        if let Some(p) = provider {
+            sess.provider_id = Some(p);
+        }
+        sess.updated_at = Utc::now();
+        Ok(())
+    })?;
+    Ok(())
+}
+
 /// Persist a partial composer prefs update at the configured scope.
 pub fn save_composer_prefs(
     project_id: Option<&str>,
@@ -3082,6 +3153,32 @@ pub fn save_composer_prefs(
     mode: Option<String>,
     permission_policy: Option<String>,
 ) -> Result<ComposerPrefs, String> {
+    save_composer_prefs_with_provider(
+        project_id,
+        session_id,
+        model_id,
+        effort,
+        mode,
+        permission_policy,
+        None,
+    )
+}
+
+/// Like [`save_composer_prefs`], and stamps `provider_id` on the session row.
+pub fn save_composer_prefs_with_provider(
+    project_id: Option<&str>,
+    session_id: Option<&str>,
+    model_id: Option<String>,
+    effort: Option<String>,
+    mode: Option<String>,
+    permission_policy: Option<String>,
+    provider_id: Option<String>,
+) -> Result<ComposerPrefs, String> {
+    stamp_session_model_route(
+        session_id,
+        model_id.as_deref(),
+        provider_id.as_deref(),
+    )?;
     let settings = load_settings();
     let scope = ComposerPrefsScope::parse(&settings.composer_prefs_scope);
 

@@ -40,6 +40,40 @@ impl Drop for ConnectHolderGuard {
     }
 }
 
+fn session_spawn_route(
+    meta: &store::SessionMeta,
+    prefs: &store::ComposerPrefs,
+) -> crate::acp_client::SessionSpawnRoute {
+    let explicit = meta
+        .provider_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            prefs
+                .provider_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        });
+    match explicit {
+        Some(id) if id.eq_ignore_ascii_case("official") => {
+            crate::acp_client::SessionSpawnRoute::Official
+        }
+        Some(id) => crate::acp_client::SessionSpawnRoute::Custom {
+            provider_id: id.to_string(),
+        },
+        None => match crate::providers::active_route() {
+            crate::providers::ActiveRoute::Official => {
+                crate::acp_client::SessionSpawnRoute::Official
+            }
+            crate::providers::ActiveRoute::Custom { id } => {
+                crate::acp_client::SessionSpawnRoute::Custom { provider_id: id }
+            }
+        },
+    }
+}
+
 fn emit_host_exit_heal(app: &AppHandle, session_id: &str) {
     let Some(message_id) = crate::turn_interrupt::heal_interrupted_turn(session_id) else {
         return;
@@ -73,6 +107,13 @@ impl SessionManager {
             session = ?app_session_id,
             "connect enqueue"
         );
+        if let Err(e) = crate::side_browser_mcp::ensure_started(&app).await {
+            tracing::warn!(
+                target: "session",
+                error = %e,
+                "embedded-browser mcp ensure_started failed (ACP proceeds without it)"
+            );
+        }
         crate::logging::sync_diag(&format!("connect enqueue session={:?}", app_session_id));
 
         let my_gen = self
@@ -367,6 +408,17 @@ impl SessionManager {
         let prefs =
             store::resolve_composer_prefs(meta.project_id.as_deref(), Some(meta.id.as_str()));
         let policy = PermissionPolicy::parse(&prefs.permission_policy);
+        let session_route = session_spawn_route(&meta, &prefs);
+        if meta.provider_id.as_deref().map(str::trim).is_none_or(|s| s.is_empty()) {
+            let stamped = match &session_route {
+                crate::acp_client::SessionSpawnRoute::Official => "official".to_string(),
+                crate::acp_client::SessionSpawnRoute::Custom { provider_id } => {
+                    provider_id.clone()
+                }
+            };
+            meta.provider_id = Some(stamped);
+            let _ = store::update_session_meta(&meta);
+        }
         let agent_model = if ssh_alias.is_some() {
             let m = prefs.model_id.trim();
             if m.is_empty() || crate::providers::is_custom_provider_id(m) {
@@ -375,7 +427,22 @@ impl SessionManager {
                 m.to_string()
             }
         } else {
-            crate::providers::agent_spawn_model_id(&prefs.model_id)
+            match &session_route {
+                crate::acp_client::SessionSpawnRoute::Official => {
+                    crate::providers::agent_spawn_model_id_for(
+                        &prefs.model_id,
+                        &crate::providers::ActiveRoute::Official,
+                    )
+                }
+                crate::acp_client::SessionSpawnRoute::Custom { provider_id } => {
+                    crate::providers::agent_spawn_model_id_for(
+                        &prefs.model_id,
+                        &crate::providers::ActiveRoute::Custom {
+                            id: provider_id.clone(),
+                        },
+                    )
+                }
+            }
         };
 
         // Pending CLI --fork-session: must cold-spawn so open can call session/fork.
@@ -756,8 +823,8 @@ impl SessionManager {
                 // Only the ownerless prewarm process is eligible for reuse.
                 // Session-bound ACP processes stay with their App session.
                 let target_custom = matches!(
-                    crate::providers::active_route(),
-                    crate::providers::ActiveRoute::Custom { .. }
+                    &session_route,
+                    crate::acp_client::SessionSpawnRoute::Custom { .. }
                 );
                 let gate = |alive: bool,
                             p_policy: PermissionPolicy,
@@ -1167,6 +1234,7 @@ impl SessionManager {
             grok_home_override: None,
             empty_mcp_servers: false,
             ssh_alias: ssh_alias.clone(),
+            session_route: Some(session_route.clone()),
         };
 
         let cwd_str = cwd.to_string_lossy().to_string();

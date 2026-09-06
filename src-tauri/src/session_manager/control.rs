@@ -582,28 +582,102 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Apply model id on the live ACP session (best-effort session/set_model).
-    pub async fn set_model(&self, model_id: String) -> Result<(), String> {
+    /// Apply model on the **named** App session (live / background / parked).
+    ///
+    /// Same-vendor catalog switches use ACP `session/set_model` on that child.
+    /// Switching vendor queues a respawn of **this session only** — never
+    /// `recycle_all_agents`.
+    pub async fn set_model(
+        &self,
+        app: &AppHandle,
+        session_id: Option<&str>,
+        model_id: String,
+        provider_id: Option<String>,
+    ) -> Result<(), String> {
         let model_id = model_id.trim().to_string();
         if model_id.is_empty() {
             return Err("model id empty".into());
         }
-        // Store composer preference; agent receives channel-resolved id.
-        let agent_model = crate::providers::agent_spawn_model_id(&model_id);
-        let (acp, sid) = {
+        let Some(session_id) = session_id.map(str::trim).filter(|s| !s.is_empty()) else {
+            return Ok(());
+        };
+        let next_route = crate::providers::route_from_provider_id(provider_id.as_deref());
+        let agent_model = crate::providers::agent_spawn_model_id_for(&model_id, &next_route);
+        let next_custom = matches!(next_route, crate::providers::ActiveRoute::Custom { .. });
+        let next_provider_label = match &next_route {
+            crate::providers::ActiveRoute::Official => "official".to_string(),
+            crate::providers::ActiveRoute::Custom { id } => id.clone(),
+        };
+
+        let mut acp: Option<Arc<AcpClient>> = None;
+        let mut agent_sid: Option<String> = None;
+        let mut route_changed = false;
+
+        {
             let mut guard = self.inner.lock();
-            if let Some(s) = guard.as_mut() {
+            if let Some(s) = guard.as_mut().filter(|s| s.app_session_id == session_id) {
                 s.model_id = Some(model_id.clone());
                 s.meta.model_id = Some(model_id.clone());
+                s.meta.provider_id = Some(next_provider_label.clone());
                 let _ = store::update_session_meta(&s.meta);
-                (s.acp.clone(), s.meta.agent_session_id.clone())
-            } else {
-                (None, None)
+                route_changed = s.acp.as_ref().is_some_and(|c| c.is_custom_route() != next_custom);
+                acp = s.acp.clone();
+                agent_sid = s.meta.agent_session_id.clone();
             }
-        };
-        // Target the live session explicitly (shared process safety).
-        if let (Some(acp), Some(sid)) = (acp, sid) {
-            acp.set_model_for(&sid, &agent_model).await?;
+        }
+        if acp.is_none() && agent_sid.is_none() {
+            if let Some(s) = self.background.lock().get_mut(session_id) {
+                s.model_id = Some(model_id.clone());
+                s.meta.model_id = Some(model_id.clone());
+                s.meta.provider_id = Some(next_provider_label.clone());
+                let _ = store::update_session_meta(&s.meta);
+                route_changed = s.acp.as_ref().is_some_and(|c| c.is_custom_route() != next_custom);
+                acp = s.acp.clone();
+                agent_sid = s.meta.agent_session_id.clone();
+            }
+        }
+        if acp.is_none() && agent_sid.is_none() {
+            let parked = self.parked.lock().remove(session_id);
+            if let Some(mut p) = parked {
+                p.model_id = Some(model_id.clone());
+                p.meta.model_id = Some(model_id.clone());
+                p.meta.provider_id = Some(next_provider_label.clone());
+                let _ = store::update_session_meta(&p.meta);
+                route_changed = p.acp.is_custom_route() != next_custom;
+                if route_changed {
+                    if !self.has_other_process_tenant(&p.process_id, session_id) {
+                        let doomed = p.acp;
+                        tokio::spawn(async move {
+                            SessionManager::kill_acp_bounded(&doomed).await;
+                        });
+                    }
+                } else {
+                    acp = Some(p.acp.clone());
+                    agent_sid = p.meta.agent_session_id.clone();
+                    self.parked.lock().insert(session_id.to_string(), p);
+                }
+            } else if let Some(mut meta) = store::load_sessions_index()
+                .into_iter()
+                .find(|s| s.id == session_id)
+            {
+                meta.model_id = Some(model_id.clone());
+                meta.provider_id = Some(next_provider_label.clone());
+                let _ = store::update_session_meta(&meta);
+            }
+        }
+
+        if route_changed {
+            self.pending_soft_respawn
+                .lock()
+                .insert(session_id.to_string(), "provider_route".into());
+            self.flush_pending_soft_respawn(app, session_id).await;
+            return Ok(());
+        }
+        if let (Some(acp), Some(sid)) = (acp, agent_sid) {
+            if let Err(e) = acp.set_model_for(&sid, &model_id).await {
+                tracing::warn!("session/set_model catalog id soft-fail: {e}");
+                let _ = acp.set_model_for(&sid, &agent_model).await;
+            }
         }
         Ok(())
     }
@@ -658,6 +732,12 @@ impl SessionManager {
                 _ => (None, false, None),
             }
         };
+        if let Err(e) = crate::side_browser_mcp::ensure_started(app).await {
+            tracing::warn!(
+                error = %e,
+                "embedded-browser mcp ensure_started failed before MCP hot-swap"
+            );
+        }
         if let (Some(sid), false, Some(cwd)) = (hot_sid, hot_busy, cwd) {
             let app_sid = self.inner.lock().as_ref().map(|s| s.app_session_id.clone());
             let servers = tauri::async_runtime::spawn_blocking(move || {

@@ -1,6 +1,7 @@
 // Side Workbench: interactive PTY + path probe + embedded browser automation.
 
 use std::path::Path;
+use serde::Serialize;
 use tauri::AppHandle;
 
 use crate::pty_host;
@@ -94,6 +95,12 @@ pub async fn side_browser_create(
     // that same loop on Windows, leaving WebView2 half-created (renderer starts,
     // but the command never returns). Match Tauri's own async create_webview
     // command and keep the blocking wait off the UI/invoke thread.
+    if let Err(e) = crate::side_browser_mcp::ensure_started(&app).await {
+        tracing::warn!(
+            error = %e,
+            "embedded-browser mcp ensure_started failed before webview create"
+        );
+    }
     tauri::async_runtime::spawn_blocking(move || {
         side_browser_host::create(&app, label, url, window_label, x, y, width, height)
     })

@@ -209,6 +209,55 @@ pub enum ActiveRoute {
     Custom { id: String },
 }
 
+/// Session-stored provider id: `None` / `"official"` → official; else custom section id.
+pub fn normalize_session_provider_id(raw: Option<&str>) -> Option<String> {
+    let id = raw.map(str::trim).filter(|s| !s.is_empty())?;
+    if id.eq_ignore_ascii_case("official") {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
+/// Resolve a session's inference route without reading the global `[models].default`.
+pub fn route_from_provider_id(provider_id: Option<&str>) -> ActiveRoute {
+    match normalize_session_provider_id(provider_id) {
+        Some(id) => ActiveRoute::Custom { id },
+        None => ActiveRoute::Official,
+    }
+}
+
+/// Sidecar GROK_HOME for custom-provider ACP children.
+///
+/// Official independent sessions keep `agent-home` (auth.json). Custom children
+/// must not strip that file, so they run from a copy of `config.toml` here.
+pub fn custom_inference_home() -> PathBuf {
+    crate::paths::app_data_root().join("agent-home-custom")
+}
+
+/// Copy `agent-home/config.toml` into the custom sidecar and ensure no auth.json.
+pub fn prepare_custom_inference_home() -> Result<PathBuf, String> {
+    materialize_custom_inference_home(&agent_config_toml(), &custom_inference_home())
+}
+
+/// Testable copy: `src_config` → `dest_home/config.toml`, delete dest auth.json.
+pub fn materialize_custom_inference_home(
+    src_config: &Path,
+    dest_home: &Path,
+) -> Result<PathBuf, String> {
+    fs::create_dir_all(dest_home).map_err(|e| format!("custom inference home: {e}"))?;
+    let dest_config = dest_home.join("config.toml");
+    if src_config.is_file() {
+        fs::copy(src_config, &dest_config)
+            .map_err(|e| format!("custom inference config copy: {e}"))?;
+    }
+    let dest_auth = dest_home.join("auth.json");
+    if dest_auth.exists() {
+        let _ = fs::remove_file(&dest_auth);
+    }
+    Ok(dest_home.to_path_buf())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderPingResult {
@@ -1379,19 +1428,25 @@ pub fn custom_provider_id_for_catalog_model(catalog_id: &str) -> Option<String> 
 
 /// Model flag for `grok agent --model` and ACP `session/set_model`.
 ///
+/// Uses the **global** active route. Prefer [`agent_spawn_model_id_for`] when
+/// a session has its own provider so two chats can stay on different vendors.
+pub fn agent_spawn_model_id(composer_model: &str) -> String {
+    agent_spawn_model_id_for(composer_model, &active_route())
+}
+
+/// Spawn `--model` for an explicit route (session-owned, not global default).
+///
 /// Grok Build behavior:
 /// - Generic custom route: pass the **provider section id** (e.g. `yunyi`) and
-///   do not keep OIDC `auth.json` in GROK_HOME.
+///   do not keep OIDC `auth.json` in that child's GROK_HOME.
 /// - Explicit Grok Build proxy route: `AcpClient::spawn` replaces this alias
 ///   with the selected real catalog model after binding the native endpoint.
 /// - Official route: pass a catalog id (`grok-4.6`); needs `auth.json`.
 /// - Official route + stale custom `app_models[].id` (#1000): map back to the
 ///   owning section id so spawn `--model` and later `session/set_model` agree.
-///   CLI `--model` does not resolve App-only `app_models` ids; ACP set_model can,
-///   which previously caused turn-1 official / turn-2 custom silent switches.
-pub fn agent_spawn_model_id(composer_model: &str) -> String {
-    match active_route() {
-        ActiveRoute::Custom { id } => id,
+pub fn agent_spawn_model_id_for(composer_model: &str, route: &ActiveRoute) -> String {
+    match route {
+        ActiveRoute::Custom { id } => id.clone(),
         ActiveRoute::Official => {
             let m = composer_model.trim();
             if m.is_empty() || is_custom_provider_id(m) || m == OFFICIAL_DEFAULT_MODEL {
@@ -1399,11 +1454,6 @@ pub fn agent_spawn_model_id(composer_model: &str) -> String {
             }
             if is_official_catalog_model(m) {
                 return m.into();
-            }
-            // Picker stored app_models[].id / active `model =` while route is still
-            // official (common under session-scoped prefs + sticky settings.json).
-            if let Some(provider_id) = custom_provider_id_for_catalog_model(m) {
-                return provider_id;
             }
             m.into()
         }
@@ -1415,9 +1465,17 @@ fn grok_build_proxy_spawn_from_text(
     composer_model: &str,
 ) -> Option<GrokBuildProxySpawn> {
     let default = get_models_default(text)?;
+    grok_build_proxy_spawn_from_section(text, &default, composer_model)
+}
+
+fn grok_build_proxy_spawn_from_section(
+    text: &str,
+    section_id: &str,
+    composer_model: &str,
+) -> Option<GrokBuildProxySpawn> {
     let section = parse_model_sections(text)
         .into_iter()
-        .find(|s| s.id == default)?;
+        .find(|s| s.id == section_id)?;
     if normalize_provider_mode(
         section
             .fields
@@ -1464,8 +1522,23 @@ fn grok_build_proxy_spawn_from_text(
 /// Resolve the active explicit Grok Build-compatible relay for one ACP spawn.
 /// The key is returned only to the spawn caller and must never be logged.
 pub fn active_grok_build_proxy_spawn(composer_model: &str) -> Option<GrokBuildProxySpawn> {
+    match active_route() {
+        ActiveRoute::Custom { id } => grok_build_proxy_spawn_for(&id, composer_model),
+        ActiveRoute::Official => None,
+    }
+}
+
+/// Grok Build proxy env for a **named** custom provider (session-owned route).
+pub fn grok_build_proxy_spawn_for(
+    provider_id: &str,
+    composer_model: &str,
+) -> Option<GrokBuildProxySpawn> {
+    let id = provider_id.trim();
+    if id.is_empty() {
+        return None;
+    }
     let text = read_text(&agent_config_toml());
-    grok_build_proxy_spawn_from_text(&text, composer_model)
+    grok_build_proxy_spawn_from_section(&text, id, composer_model)
 }
 
 /// After official login / account switch: only the official route should

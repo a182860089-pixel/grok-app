@@ -273,6 +273,8 @@ export interface ComposerPrefs {
   permissionPolicy: string;
   scope: string;
   source: string;
+  /** Session-owned vendor: `official` or a custom provider id. */
+  providerId?: string | null;
 }
 
 export async function settingsGet() {
@@ -305,6 +307,7 @@ export async function composerPrefsSet(body: {
   effort?: string | null;
   mode?: string | null;
   permissionPolicy?: string | null;
+  providerId?: string | null;
 }) {
   return invoke<ComposerPrefs>("composer_prefs_set", {
     projectId: body.projectId ?? null,
@@ -313,6 +316,7 @@ export async function composerPrefsSet(body: {
     effort: body.effort ?? null,
     mode: body.mode ?? null,
     permissionPolicy: body.permissionPolicy ?? null,
+    providerId: body.providerId ?? null,
   });
 }
 
@@ -336,13 +340,18 @@ export async function sessionSetPolicy(
 /** Switch live agent model + persist at configured prefs scope. */
 export async function sessionSetModel(
   modelId: string,
-  opts?: { projectId?: string | null; sessionId?: string | null },
+  opts?: {
+    projectId?: string | null;
+    sessionId?: string | null;
+    providerId?: string | null;
+  },
 ) {
   if (!isTauri()) return null;
   return invoke<ComposerPrefs>("session_set_model", {
     modelId,
     projectId: opts?.projectId ?? null,
     sessionId: opts?.sessionId ?? null,
+    providerId: opts?.providerId ?? null,
   });
 }
 
