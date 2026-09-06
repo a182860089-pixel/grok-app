@@ -33,6 +33,7 @@ import {
 } from "@/lib/browserDesignMode";
 import { setDraft } from "@/lib/composerDraftStore";
 import {
+  DEFAULT_BROWSER_URL,
   isLoopbackHttpUrl,
   normalizeBrowserUrl,
 } from "@/lib/sshLoopbackUrl";
@@ -72,7 +73,7 @@ export function BrowserTab({
   const [url, setUrl] = useState(
     () =>
       normalizeBrowserUrl(
-        (initialUrl || "").trim() || "https://www.google.com",
+        (initialUrl || "").trim() || DEFAULT_BROWSER_URL,
         { preferHttpLoopback },
       ),
   );

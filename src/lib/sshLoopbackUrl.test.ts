@@ -75,4 +75,10 @@ describe("normalizeBrowserUrl", () => {
       "https://localhost:3000",
     );
   });
+
+  it("uses about:blank for an empty new tab and keeps about: URLs", () => {
+    expect(normalizeBrowserUrl("")).toBe("about:blank");
+    expect(normalizeBrowserUrl("   ")).toBe("about:blank");
+    expect(normalizeBrowserUrl("about:blank")).toBe("about:blank");
+  });
 });

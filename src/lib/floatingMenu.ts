@@ -293,6 +293,8 @@ export function useFloatingMenu({
   const [triggerW, setTriggerW] = useState(0);
   const [settled, setSettled] = useState(false);
   const settledRef = useRef(false);
+  const rootsRef = useRef(roots);
+  rootsRef.current = roots;
   const optsRef = useRef({
     width,
     minWidth,
@@ -428,7 +430,12 @@ export function useFloatingMenu({
     // scrolling). Those used to re-anchor the menu every frame → flicker.
     const onScroll = (e: Event) => {
       const t = e.target;
-      if (t instanceof Node && panelRef.current?.contains(t)) return;
+      if (t instanceof Node) {
+        if (panelRef.current?.contains(t)) return;
+        for (const r of rootsRef.current) {
+          if (r.current?.contains(t)) return;
+        }
+      }
       update(true);
     };
     const onResize = () => update(true);

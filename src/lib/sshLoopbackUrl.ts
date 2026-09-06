@@ -64,6 +64,9 @@ export function rewriteLoopbackUrl(
   return `${t.scheme}://127.0.0.1:${localPort}${rest}`;
 }
 
+/** New tab when the picker does not pass a URL. Avoids hanging on google.com. */
+export const DEFAULT_BROWSER_URL = "about:blank";
+
 /**
  * Address-bar commit. Bare `localhost:3000` on an SSH project must be http,
  * not https — Vite / grok preview bind http on the remote loopback.
@@ -72,8 +75,9 @@ export function normalizeBrowserUrl(
   raw: string,
   opts?: { preferHttpLoopback?: boolean },
 ): string {
-  const next = raw.trim() || "https://www.google.com";
+  const next = raw.trim() || DEFAULT_BROWSER_URL;
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(next)) return next;
+  if (/^about:/i.test(next)) return next;
   if (opts?.preferHttpLoopback) {
     const hostport = next.split("/")[0] ?? "";
     let host = hostport;

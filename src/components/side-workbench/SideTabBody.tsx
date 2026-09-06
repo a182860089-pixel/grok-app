@@ -34,7 +34,13 @@ export function SideTabBody({
 
   if (tab.kind === "browser") {
     return (
-      <Suspense fallback={null}>
+      <Suspense
+        fallback={
+          <div className="sw-body sw-body--placeholder" role="status">
+            {tr("resources.loading")}
+          </div>
+        }
+      >
         <BrowserTab
           locale={locale}
           tabId={tab.id}
@@ -49,7 +55,13 @@ export function SideTabBody({
 
   if (tab.kind === "terminal") {
     return (
-      <Suspense fallback={null}>
+      <Suspense
+        fallback={
+          <div className="sw-body sw-body--placeholder" role="status">
+            {tr("resources.loading")}
+          </div>
+        }
+      >
         <TerminalTab
           locale={locale}
           tabId={tab.id}

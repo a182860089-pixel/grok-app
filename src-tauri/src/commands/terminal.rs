@@ -1,7 +1,6 @@
 // Side Workbench: interactive PTY + path probe + embedded browser automation.
 
 use std::path::Path;
-use serde::Serialize;
 use tauri::AppHandle;
 
 use crate::pty_host;
