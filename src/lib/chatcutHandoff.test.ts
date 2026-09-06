@@ -8,6 +8,7 @@ import {
   resolveChatcutHandoff,
   resolveChatcutHandoffFromToolEvent,
   resolveChatcutLinkClick,
+  chatHttpLinkDestination,
   resourceOpenTargetFromChatcutPayload,
   stripChatcutInternalParams,
 } from "./chatcutHandoff";
@@ -220,5 +221,19 @@ describe("tool event + link click paths", () => {
     if (bill.kind === "open_external") {
       expect(bill.reason).toBe("billing");
     }
+  });
+
+  it("sends regular chat http(s) links to the in-app browser", () => {
+    expect(chatHttpLinkDestination("https://example.com/docs")).toEqual({
+      mode: "in-app",
+      url: "https://example.com/docs",
+    });
+    expect(chatHttpLinkDestination(BILLING)).toEqual({
+      mode: "system",
+      url: BILLING,
+    });
+    const ed = chatHttpLinkDestination(INTERNAL, { locale: "en" });
+    expect(ed.mode).toBe("system");
+    expect(chatHttpLinkDestination("not-a-url")).toEqual({ mode: "none" });
   });
 });

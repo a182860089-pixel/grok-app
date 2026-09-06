@@ -475,10 +475,43 @@ export function resourceOpenTargetFromChatcutPayload(
 }
 
 /**
- * When the user clicks an http(s) link in chat, decide open strategy.
- * Editor → system browser (default); billing → system browser; other ChatCut → external.
- * Pass `forceEditorInApp: true` for the side Resources browser.
+ * ChatCut-specific click policy. Callers that open **any** chat http(s) link
+ * should use {@link chatHttpLinkDestination} (regular hosts → in-app browser;
+ * ChatCut billing/editor stay on the system browser).
+ *
+ * Pass `forceEditorInApp: true` to send ChatCut editor URLs to the side browser.
  */
+export type ChatHttpLinkDestination =
+  | { mode: "in-app"; url: string }
+  | { mode: "system"; url: string }
+  | { mode: "none" };
+
+/**
+ * Where a chat markdown http(s) click should go.
+ *
+ * Regular links open in the in-app side browser so Windows "choose a browser"
+ * (no default HTTP handler) is not a dead end. ChatCut billing / editor stay
+ * on the system browser — the embedded WebView cannot reliably play that media.
+ */
+export function chatHttpLinkDestination(
+  href: string,
+  opts: ResolveChatcutHandoffOptions = {},
+): ChatHttpLinkDestination {
+  const url = (href ?? "").trim();
+  if (!isHttpUrl(url)) return { mode: "none" };
+  const action = resolveChatcutLinkClick(url, opts);
+  if (action.kind === "open_in_app_browser") {
+    return { mode: "in-app", url: action.url };
+  }
+  if (action.kind === "open_external") {
+    if (action.reason === "billing" || action.reason === "editor") {
+      return { mode: "system", url: action.url };
+    }
+    return { mode: "in-app", url: action.url };
+  }
+  return { mode: "in-app", url };
+}
+
 export function resolveChatcutLinkClick(
   href: string,
   opts: ResolveChatcutHandoffOptions = {},

@@ -23,6 +23,7 @@ import {
 import { loadConfirmExternalLinksPref } from "@/lib/externalLinkPref";
 import {
   chatcutHandoffToResourceOpenTarget,
+  chatHttpLinkDestination,
   resolveChatcutLinkClick,
 } from "@/lib/chatcutHandoff";
 import { loadStopAllSkipConfirmPref } from "@/lib/stopAllSkipConfirmPref";
@@ -4486,29 +4487,36 @@ export function AppWorkbench() {
     [],
   );
 
-  /** Open chat markdown http(s) links via desktop shell; optional confirm pref. */
+  /** Chat http(s) links → in-app side browser; ChatCut billing/editor stay system. */
   const openExternalLinkFromChat = useCallback(
     (url: string) => {
-      // ChatCut editor/billing → system default browser (EmbeddedBrowser cannot
-      // reliably play media). Opt-in only: forceEditorInApp → side Resources.
-      const action = resolveChatcutLinkClick(url, { locale });
-      if (action.kind === "open_in_app_browser") {
-        const target = chatcutHandoffToResourceOpenTarget(action);
-        if (target) {
-          navigateWorkbench();
-          openAsidePane();
-          setResourceOpenTarget(target);
-          return;
+      const dest = chatHttpLinkDestination(url, { locale });
+      if (dest.mode === "none") return;
+      if (dest.mode === "in-app") {
+        const action = resolveChatcutLinkClick(url, { locale });
+        if (action.kind === "open_in_app_browser") {
+          const target = chatcutHandoffToResourceOpenTarget(action);
+          if (target) {
+            navigateWorkbench();
+            openAsidePane();
+            setResourceOpenTarget(target);
+            return;
+          }
         }
+        navigateWorkbench();
+        openAsidePane();
+        setResourceOpenTarget({
+          type: "url",
+          url: dest.url,
+          title: dest.url,
+        });
+        return;
       }
-      // Prefer resolved external URL (locale + stripped Codex-only params).
-      const openUrl =
-        action.kind === "open_external" ? action.url : url;
+      const openUrl = dest.url;
       const doOpen = () => {
         if (api.isTauri()) {
           void api.openExternalUrl(openUrl).catch((e) => {
             console.error("[chat] openExternalUrl failed", e);
-            // Fallback for hosts that reject shell open.
             try {
               window.open(openUrl, "_blank", "noopener,noreferrer");
             } catch {
@@ -14759,6 +14767,7 @@ export function AppWorkbench() {
               modeAsk: tr("mode.ask"),
               modelGroupOfficial: tr("composer.modelGroupOfficial"),
               modelViaProvider: tr("composer.modelViaProvider"),
+              modelPickerHint: tr("composer.modelPickerHint"),
               policyAsk: tr("policy.ask"),
               policyAcceptEdits: tr("policy.accept_edits"),
               policySession: tr("policy.allow_for_session"),
