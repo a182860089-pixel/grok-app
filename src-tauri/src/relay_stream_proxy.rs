@@ -40,8 +40,17 @@ fn start_lock() -> &'static Mutex<()> {
 
 /// Hosts that need SSE sanitizing before Grok Build sees them.
 pub fn host_needs_stream_sanitize(base_url: &str) -> bool {
+    host_needs_stream_sanitize_for(base_url, "")
+}
+
+/// OpenCode proprietary trailers, or any Responses backend that may omit
+/// `sequence_number` (CLI 1.0.13 fatals on `response.created` without it).
+pub fn host_needs_stream_sanitize_for(base_url: &str, api_backend: &str) -> bool {
     let u = base_url.trim().to_ascii_lowercase();
-    u.contains("opencode.ai") || u.contains("/zen/go")
+    if u.contains("opencode.ai") || u.contains("/zen/go") {
+        return true;
+    }
+    crate::providers::normalize_backend(Some(api_backend)) == "responses"
 }
 
 /// Whether a single SSE `data:` payload should be dropped (CLI-unsafe).
@@ -73,16 +82,32 @@ pub fn should_drop_sse_data_payload(payload: &str) -> bool {
         if choices_empty || v.get("cost").is_some() || v.get("normalizedUsage").is_some() {
             return true;
         }
-        if let Some(t) = v.get("type").and_then(|t| t.as_str()) {
-            if t.starts_with("response.")
-                && v.get("sequence_number").is_none()
-                && (t.contains("delta") || t.contains("ping"))
-            {
-                return true;
-            }
-        }
     }
     false
+}
+
+/// Inject a monotonic `sequence_number` on Responses events that omit it.
+/// Returns the original payload when no rewrite is needed.
+pub fn inject_missing_sequence_number(payload: &str, seq: &mut u64) -> String {
+    let raw = payload.trim();
+    if raw.is_empty() || raw == "[DONE]" {
+        return payload.to_string();
+    }
+    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return payload.to_string();
+    };
+    let t = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
+    if t.starts_with("response.") && v.get("sequence_number").is_none() {
+        if let Some(obj) = v.as_object_mut() {
+            obj.insert(
+                "sequence_number".into(),
+                serde_json::Value::from(*seq),
+            );
+            *seq = seq.saturating_add(1);
+            return v.to_string();
+        }
+    }
+    payload.to_string()
 }
 
 /// Decode streaming UTF-8 without corrupting multi-byte chars at chunk boundaries.
@@ -127,6 +152,11 @@ pub fn push_utf8_stream(pending: &mut Vec<u8>, chunk: &[u8], out: &mut String) {
 
 /// Filter one SSE event block (terminated by blank line).
 pub fn filter_sse_event(event: &str) -> String {
+    let mut seq = 0u64;
+    filter_sse_event_with_seq(event, &mut seq)
+}
+
+fn filter_sse_event_with_seq(event: &str, seq: &mut u64) -> String {
     let mut data_payloads: Vec<String> = Vec::new();
     let mut other: Vec<String> = Vec::new();
     for line in event.lines() {
@@ -144,8 +174,14 @@ pub fn filter_sse_event(event: &str) -> String {
         out.push_str("\n\n");
         return out;
     }
-    data_payloads.retain(|p| !should_drop_sse_data_payload(p));
-    if data_payloads.is_empty() {
+    let mut kept: Vec<String> = Vec::new();
+    for p in data_payloads {
+        if should_drop_sse_data_payload(&p) {
+            continue;
+        }
+        kept.push(inject_missing_sequence_number(&p, seq));
+    }
+    if kept.is_empty() {
         return String::new();
     }
     let mut out = String::new();
@@ -153,7 +189,7 @@ pub fn filter_sse_event(event: &str) -> String {
         out.push_str(&o);
         out.push('\n');
     }
-    for d in data_payloads {
+    for d in kept {
         out.push_str("data: ");
         out.push_str(&d);
         out.push('\n');
@@ -272,7 +308,7 @@ pub fn rewrite_base_for_cli(
     if is_local_sanitize_proxy_url(&real) {
         return Ok((real, None));
     }
-    if !host_needs_stream_sanitize(&real) {
+    if !host_needs_stream_sanitize_for(&real, api_backend) {
         return Ok((real, None));
     }
     let port = ensure_started_blocking()?;
@@ -303,7 +339,7 @@ pub fn repair_sanitize_proxy_bases() -> Result<bool, String> {
             .map(|x| x.as_str())
             .unwrap_or("chat_completions");
         let displayed = effective_upstream_base(&s.fields);
-        if !host_needs_stream_sanitize(&displayed) {
+        if !host_needs_stream_sanitize_for(&displayed, backend) {
             // Drop stale app_upstream if the host no longer needs sanitizing.
             continue;
         }
@@ -462,6 +498,7 @@ async fn proxy_request(req: Request) -> Result<Response, String> {
         let mut stream = byte_stream;
         let mut utf8_pending: Vec<u8> = Vec::new();
         let mut line_buf = String::new();
+        let mut seq: u64 = 0;
         loop {
             let item = match tokio::time::timeout(RELAY_STREAM_IDLE_TIMEOUT, stream.next()).await {
                 Ok(item) => item,
@@ -480,7 +517,7 @@ async fn proxy_request(req: Request) -> Result<Response, String> {
                         let end = pos + delimiter_len;
                         let event = line_buf[..end].to_string();
                         line_buf = line_buf[end..].to_string();
-                        let kept = filter_sse_event(&event);
+                        let kept = filter_sse_event_with_seq(&event, &mut seq);
                         if !kept.is_empty() {
                             yield Ok::<Bytes, Infallible>(Bytes::from(kept));
                         }
@@ -499,7 +536,7 @@ async fn proxy_request(req: Request) -> Result<Response, String> {
             utf8_pending.clear();
         }
         if !line_buf.is_empty() {
-            let kept = filter_sse_event(&line_buf);
+            let kept = filter_sse_event_with_seq(&line_buf, &mut seq);
             if !kept.is_empty() {
                 yield Ok::<Bytes, Infallible>(Bytes::from(kept));
             }
@@ -640,6 +677,39 @@ mod tests {
     fn host_detects_opencode() {
         assert!(host_needs_stream_sanitize("https://opencode.ai/zen/go/v1"));
         assert!(!host_needs_stream_sanitize("https://api.deepseek.com/v1"));
+        assert!(host_needs_stream_sanitize_for(
+            "https://lumingapi.store/v1",
+            "responses"
+        ));
+        assert!(!host_needs_stream_sanitize_for(
+            "https://api.deepseek.com/v1",
+            "chat_completions"
+        ));
+    }
+
+    #[test]
+    fn injects_sequence_number_on_response_created() {
+        let raw = r#"{"type":"response.created","response":{"id":"resp-1","object":"response","output":[],"status":"in_progress"}}"#;
+        let mut seq = 0u64;
+        let out = inject_missing_sequence_number(raw, &mut seq);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["sequence_number"], 0);
+        assert_eq!(seq, 1);
+        let again = inject_missing_sequence_number(&out, &mut seq);
+        let v2: serde_json::Value = serde_json::from_str(&again).unwrap();
+        assert_eq!(v2["sequence_number"], 0);
+        assert_eq!(seq, 1);
+    }
+
+    #[test]
+    fn filter_event_injects_sequence_across_chunks() {
+        let ev = "data: {\"type\":\"response.created\",\"response\":{\"id\":\"r\"}}\n\n";
+        let mut seq = 0u64;
+        let out = filter_sse_event_with_seq(ev, &mut seq);
+        assert!(out.contains("\"sequence_number\":0"));
+        let ev2 = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n";
+        let out2 = filter_sse_event_with_seq(ev2, &mut seq);
+        assert!(out2.contains("\"sequence_number\":1"));
     }
 
     #[test]
