@@ -5,6 +5,8 @@
  */
 
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -201,20 +203,51 @@ import {
   rectsOverlap,
 } from "@/components/settings/shared";
 import type { MarqueeBox } from "@/components/settings/types";
-import { GeneralSection } from "@/components/settings/GeneralSection";
-import { AppearanceSection } from "@/components/settings/AppearanceSection";
 import {
   acquireAppearanceWrite,
   subscribeAppearanceWriteBusy,
 } from "@/lib/appearanceWriteLock";
-import { AccountSection } from "@/components/settings/AccountSection";
-import { ArchivedSection } from "@/components/settings/ArchivedSection";
-import { ExtensionsSection } from "@/components/settings/ExtensionsSection";
-import { RemoteImSection } from "@/components/settings/RemoteImSection";
-import { RuntimeSection } from "@/components/settings/RuntimeSection";
-import { ShortcutsSection } from "@/components/settings/ShortcutsSection";
-import { AboutSection } from "@/components/settings/AboutSection";
-import { PetSection } from "@/components/settings/PetSection";
+
+const GeneralSection = lazy(async () => {
+  const m = await import("@/components/settings/GeneralSection");
+  return { default: m.GeneralSection };
+});
+const AppearanceSection = lazy(async () => {
+  const m = await import("@/components/settings/AppearanceSection");
+  return { default: m.AppearanceSection };
+});
+const AccountSection = lazy(async () => {
+  const m = await import("@/components/settings/AccountSection");
+  return { default: m.AccountSection };
+});
+const ArchivedSection = lazy(async () => {
+  const m = await import("@/components/settings/ArchivedSection");
+  return { default: m.ArchivedSection };
+});
+const ExtensionsSection = lazy(async () => {
+  const m = await import("@/components/settings/ExtensionsSection");
+  return { default: m.ExtensionsSection };
+});
+const RemoteImSection = lazy(async () => {
+  const m = await import("@/components/settings/RemoteImSection");
+  return { default: m.RemoteImSection };
+});
+const RuntimeSection = lazy(async () => {
+  const m = await import("@/components/settings/RuntimeSection");
+  return { default: m.RuntimeSection };
+});
+const ShortcutsSection = lazy(async () => {
+  const m = await import("@/components/settings/ShortcutsSection");
+  return { default: m.ShortcutsSection };
+});
+const AboutSection = lazy(async () => {
+  const m = await import("@/components/settings/AboutSection");
+  return { default: m.AboutSection };
+});
+const PetSection = lazy(async () => {
+  const m = await import("@/components/settings/PetSection");
+  return { default: m.PetSection };
+});
 
 export type {
   SettingsSectionId,
@@ -1942,6 +1975,7 @@ export function SettingsPage({
           <h1 className="settings-page__title">{title}</h1>
         ) : null}
 
+        <Suspense fallback={null}>
         {section === "general" && <GeneralSection />}
         {section === "appearance" && <AppearanceSection />}
         {section === "account" && <AccountSection />}
@@ -1952,6 +1986,7 @@ export function SettingsPage({
         {section === "runtime" && <RuntimeSection />}
         {section === "shortcuts" && <ShortcutsSection />}
         {section === "about" && <AboutSection />}
+        </Suspense>
       </main>
       </div>
 

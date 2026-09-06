@@ -47,6 +47,27 @@ describe("vendorManualChunk", () => {
     ).toBe("codemirror");
   });
 
+  it("groups pdf / office / media previewers", () => {
+    expect(
+      vendorManualChunk("/repo/node_modules/pdfjs-dist/build/pdf.mjs"),
+    ).toBe("pdfjs");
+    expect(
+      vendorManualChunk("/repo/node_modules/react-pdf/dist/index.js"),
+    ).toBe("pdfjs");
+    expect(
+      vendorManualChunk("/repo/node_modules/xlsx/xlsx.mjs"),
+    ).toBe("xlsx");
+    expect(
+      vendorManualChunk("/repo/node_modules/docx-preview/dist/docx-preview.js"),
+    ).toBe("docx");
+    expect(
+      vendorManualChunk("/repo/node_modules/plyr/dist/plyr.min.js"),
+    ).toBe("plyr");
+    expect(
+      vendorManualChunk("/repo/node_modules/highlight.js/lib/core.js"),
+    ).toBe("hljs");
+  });
+
   it("groups react-markdown and remark-gfm", () => {
     expect(
       vendorManualChunk("/repo/node_modules/react-markdown/index.js"),

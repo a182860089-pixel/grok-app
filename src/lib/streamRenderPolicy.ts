@@ -137,7 +137,9 @@ export function readStreamPerfFlag(
 export function shouldPlayWallpaperVideo(opts: {
   visibilityState?: string;
   streamPerf?: boolean;
+  reducedMotion?: boolean;
 }): boolean {
+  if (opts.reducedMotion) return false;
   if ((opts.visibilityState ?? "visible") === "hidden") return false;
   return !opts.streamPerf;
 }

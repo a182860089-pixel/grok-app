@@ -98,5 +98,6 @@ describe("streamRenderPolicy", () => {
         streamPerf: true,
       }),
     ).toBe(false);
+    expect(shouldPlayWallpaperVideo({ reducedMotion: true })).toBe(false);
   });
 });

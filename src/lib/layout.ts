@@ -9,6 +9,8 @@
  *   except to enforce chrome min / viewport max.
  */
 
+import { liveDragWidth } from "./motionSpring";
+
 export const LAYOUT_STORAGE_KEY = "grok-app.layout";
 
 /** Mirror phone CSS drawer breakpoint (`app.css` max-width: 820px). */
@@ -120,6 +122,20 @@ export function clampSidebarDragWidth(
   opts?: SidebarClampOpts,
 ): number {
   return clampSidebarWidth(w, opts);
+}
+
+/** Live sample while dragging: 1:1 in range, rubber-band past max. */
+export function liveSidebarDragWidth(
+  w: number,
+  opts?: SidebarClampOpts,
+): number {
+  const hard = clampSidebarWidth(
+    Number.isFinite(w) ? Math.max(w, SIDEBAR_WIDTH_MIN) : SIDEBAR_WIDTH_MIN,
+    opts,
+  );
+  const max = clampSidebarWidth(SIDEBAR_WIDTH_MAX, opts);
+  if (w <= max) return hard;
+  return Math.round(liveDragWidth(w, SIDEBAR_WIDTH_MIN, max));
 }
 
 export type SidebarDragEndResult =
@@ -235,6 +251,19 @@ export function clampAsideWidth(w: number, opts?: AsideClampOpts): number {
   // Squeezed frame: prefer the chat floor (max) over forcing chrome min.
   if (max < min) return Math.max(0, max);
   return Math.min(max, Math.max(min, raw));
+}
+
+/** Live aside drag: 1:1 in range, rubber-band past the chat-floor max. */
+export function liveAsideDragWidth(
+  w: number,
+  opts?: AsideClampOpts,
+): number {
+  const min = asideChromeSafeMin(opts);
+  const max = asideWidthMax(opts);
+  if (max < min) return Math.max(0, max);
+  if (!Number.isFinite(w)) return DEFAULT_LAYOUT.asideWidth;
+  if (w <= max && w >= min) return Math.round(w);
+  return Math.round(liveDragWidth(w, min, max, { bandMin: true }));
 }
 
 /**

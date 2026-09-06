@@ -22,7 +22,11 @@ import { Tip } from "@/components/ui/tooltip";
 import { TerminalTab } from "@/components/side-workbench/TerminalTab";
 import { isSideTabMiddleClick } from "@/lib/sideWorkbench";
 import { paneSplitSizeStyle } from "@/lib/paneSplitMotion";
-import type { BottomTerminalState } from "@/lib/bottomTerminal";
+import {
+  clampBottomTerminalHeight,
+  liveBottomTerminalHeight,
+  type BottomTerminalState,
+} from "@/lib/bottomTerminal";
 
 export type BottomTerminalProps = {
   locale: Locale | string;
@@ -55,7 +59,9 @@ export function BottomTerminal({
     null,
   );
   const [resizing, setResizing] = useState(false);
-  const paintH = state.open ? state.height : 0;
+  const [liveH, setLiveH] = useState<number | null>(null);
+  const liveHRef = useRef<number | null>(null);
+  const paintH = state.open ? (liveH ?? state.height) : 0;
 
   const onResizePointerDown = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -80,15 +86,24 @@ export function BottomTerminal({
       const drag = dragRef.current;
       if (!drag) return;
       const dy = drag.startY - e.clientY;
-      onHeightChange(drag.startH + dy, drag.max);
+      const next = liveBottomTerminalHeight(drag.startH + dy, drag.max);
+      liveHRef.current = next;
+      setLiveH(next);
     },
-    [onHeightChange],
+    [],
   );
 
   const onResizePointerUp = useCallback(() => {
+    const drag = dragRef.current;
+    const h = liveHRef.current;
     dragRef.current = null;
+    liveHRef.current = null;
     setResizing(false);
-  }, []);
+    setLiveH(null);
+    if (drag && h != null) {
+      onHeightChange(clampBottomTerminalHeight(h, drag.max), drag.max);
+    }
+  }, [onHeightChange]);
 
   const many = state.tabs.length > 1;
 

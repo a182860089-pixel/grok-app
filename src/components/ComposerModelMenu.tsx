@@ -72,7 +72,14 @@ const FLYOUT_MIN_W = 168;
 
 function flyoutPreferredWidth(kind: HubFlyout, measured: number): number {
   if (measured > 0) return measured;
-  return kind === "models" ? 220 : 200;
+  return kind === "window" ? 240 : kind === "models" ? 220 : 200;
+}
+
+function flyoutPreferredHeight(kind: HubFlyout, measured: number): number {
+  if (measured > 0) return measured;
+  if (kind === "window") return 148;
+  if (kind === "models") return 200;
+  return 160;
 }
 
 /**
@@ -111,9 +118,10 @@ export function placeHubFlyout(
     wantW,
     Math.max(FLYOUT_MIN_W, vw - FLYOUT_EDGE * 2),
   );
-  const cap = kind === "models" ? 240 : 280;
+  const cap = kind === "models" ? 240 : kind === "window" ? 200 : 280;
   const flyH = flyout?.offsetHeight ?? 0;
-  const preferredH = flyH > 0 ? flyH : Math.min(120, cap);
+  const preferredH = flyoutPreferredHeight(kind, flyH);
+  const minH = kind === "window" ? 148 : 96;
   const anchorTop =
     row && Number.isFinite(row.top) ? row.top : hub.top;
   let top = Math.max(FLYOUT_EDGE, anchorTop);
@@ -121,11 +129,14 @@ export function placeHubFlyout(
   if (top + usedH > vh - FLYOUT_EDGE) {
     top = Math.max(FLYOUT_EDGE, vh - FLYOUT_EDGE - usedH);
   }
-  const maxH = Math.min(cap, Math.max(96, vh - FLYOUT_EDGE - top));
+  const maxH = Math.min(
+    cap,
+    Math.max(minH, vh - FLYOUT_EDGE - top),
+  );
   const pos: CSSProperties = {
     position: "fixed",
     top,
-    zIndex: FLOATING_MENU_Z_INDEX,
+    zIndex: FLOATING_MENU_Z_INDEX + 2,
     maxHeight: maxH,
     maxWidth: panelW,
     width: panelW,
@@ -851,7 +862,6 @@ export function ComposerModelMenu({
         "cmm__pop--model" + (pane === "advanced" ? " cmm__pop--hub" : "")
       }
       tipClassName="ui-tip--flat"
-      pinParent
       triggerIcon={<IconBolt size={14} />}
       triggerText={triggerText}
       triggerShort={eLabel}
@@ -1127,13 +1137,11 @@ export function ComposerModelMenu({
                   );
                 })
               ) : (
-                <div className="cmm__opt cmm__opt--muted">
+                <div className="cmm__window-edit">
                   {contextWindowEditable ? (
                     <>
-                      <span className="cmm__opt-main">
-                        <span className="cmm__opt-title">
-                          {labels.contextWindowCustom}
-                        </span>
+                      <span className="cmm__window-edit-label">
+                        {labels.contextWindowCustom}
                       </span>
                       <div className="cmm__inline-edit">
                         <input

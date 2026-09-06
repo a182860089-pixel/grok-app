@@ -78,9 +78,14 @@
   justify-content: center;
 }
 
-.composer__model-bar:has(.is-open) {
-  width: 280px;
-  max-width: 280px;
+.composer__row .cmm--model {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(240px, 46%);
+}
+
+.composer__row .cmm--model .cmm__trigger {
+  max-width: 100%;
 }
 
 .composer__chip-shell .cmm__trigger {

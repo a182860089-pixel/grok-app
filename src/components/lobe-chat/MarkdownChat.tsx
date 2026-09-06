@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import "katex/dist/katex.min.css";
 import type { Locale } from "@/i18n";
 import {
   MARKDOWN_REHYPE_PLUGINS,

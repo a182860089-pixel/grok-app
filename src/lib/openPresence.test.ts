@@ -199,15 +199,17 @@ describe("floating pop CSS", () => {
     );
   });
 
-  it("loads settings before the first navigation can hard-cut in", () => {
+  it("lazy-loads the settings stage and prefetches after the workbench is ready", () => {
+    expect(appWorkbench).toMatch(
+      /lazy\(async \(\) => \{\s*const m = await import\("@\/app\/WorkbenchSettingsStage"/,
+    );
+    expect(appWorkbench).toMatch(/function prefetchSettingsStage\(\)/);
+    expect(appWorkbench).toMatch(/prefetchSettingsStage\(\)/);
+    expect(appWorkbench).toMatch(
+      /className="app-settings-stage is-open"[\s\S]*data-testid="settings-stage"/,
+    );
     expect(settingsStage).toMatch(
       /import\s*\{\s*SettingsPage(?:\s*,\s*type SettingsSectionId)?\s*\}\s*from "@\/components\/SettingsPage"/,
-    );
-    expect(appWorkbench).not.toMatch(
-      /(?:lazy|import)\([^\n]*@\/components\/SettingsPage/,
-    );
-    expect(settingsStage).not.toMatch(
-      /(?:lazy|import)\([^\n]*@\/components\/SettingsPage/,
     );
   });
 

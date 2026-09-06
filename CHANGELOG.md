@@ -13,6 +13,18 @@ See `docs/llm-wiki/release.md`.
 
 ## [Unreleased]
 
+### Changed
+- Remote IM no longer auto-starts or runs a health loop when the bridge is off. Bound credentials do not flip it back on; Start in Settings still restores it.
+- Buttons, chips, and permission actions press in on pointer-down. Frosted glass becomes solid when the OS asks for reduced transparency.
+- Settings, Office previewers, and the terminal no longer ride in the first JS payload. The workbench prefetches Settings after idle so the first open still has no blank cut.
+- Sidebar, aside, and bottom-terminal splitters rubber-band past their max while dragging, then snap on release. Windows/Linux sidebars stay solid (no CSS blur). Wallpaper video pauses when the OS asks for reduced motion. Unclean restarts write logs/last_crash.json with pid, leases, and the last native exception line.
+
+**中文 · 变更**
+- 远程 IM 在 Bridge 关闭时不再自动拉起，也不再跑健康检查。磁盘上的凭据不会把它重新打开；设置里点启动仍会恢复。
+- 按钮、芯片和权限操作在按下时就会缩一下。系统要求降低透明度时，毛玻璃改走实心底。
+- 设置、Office 预览和终端不再跟第一包 JS 一起下来。工作台空闲后会预取设置，第一次打开仍不会空一截。
+- 侧栏 / 右栏 / 底栏拖过上限会发黏，松手再吸回。Win/Linux 侧栏实心不再套 CSS blur。系统开了减少动态时壁纸视频停。异常重启会写 logs/last_crash.json（pid、脏 lease、上次原生异常行）。
+
 ### Fixed
 - Custom-model chats no longer switch models between turn 1 and turn 2. Picker `app_models` ids resolve to the same config section for spawn and reconnect (#1000).
 - Windows can add a project by dropping a folder on the sidebar again. Native drag-drop paths are restored; path-less sidebar drops show a clear hint instead of doing nothing (#999).

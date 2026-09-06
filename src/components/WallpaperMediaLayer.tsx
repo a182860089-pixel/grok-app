@@ -207,6 +207,8 @@ export function WallpaperMediaLayer({
       const play = shouldPlayWallpaperVideo({
         visibilityState: document.visibilityState,
         streamPerf: readStreamPerfFlag(document.documentElement.dataset),
+        reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)")
+          .matches,
       });
       if (play) {
         void el.play().catch(() => {});

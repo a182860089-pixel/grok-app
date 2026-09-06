@@ -28,6 +28,13 @@ fn runtime_slot() -> &'static AsyncMutex<RuntimeSlot> {
 static RESTART_ATTEMPTS: AtomicU32 = AtomicU32::new(0);
 /// Unix seconds when next auto-restart is allowed (0 = try immediately).
 static NEXT_RETRY_UNIX: AtomicU64 = AtomicU64::new(0);
+static WATCHDOG_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Boot-time: spawn autostart + watchdog only when the bridge is on **and**
+/// at least one channel can connect. Disabled-with-credentials stays off.
+pub fn should_boot_connectors(enabled: bool, has_ready_instances: bool) -> bool {
+    enabled && has_ready_instances
+}
 
 #[derive(Debug)]
 pub struct BridgeRuntime {
@@ -248,20 +255,17 @@ impl BridgeRuntime {
         self.stop_async_inner(true).await
     }
 
-    /// Called on App launch: if Bridge was enabled (or ready channels exist), start connectors.
+    /// Called on App launch: start connectors only when the user left the
+    /// bridge **enabled**. Credentials on disk do not flip `enabled` back on.
     pub async fn try_autostart_async(&mut self) -> Result<(), String> {
         if *self.running.lock() {
             return Ok(());
         }
-        if !self.enabled && !config::has_ready_instances() {
-            return Ok(());
-        }
-        // Prefer explicit enabled; also start when bound channels exist (user expectation).
-        if !self.enabled && config::has_ready_instances() {
-            self.enabled = true;
-            self.persist_config();
-        }
-        if !self.enabled {
+        if !should_boot_connectors(self.enabled, config::has_ready_instances()) {
+            tracing::info!(
+                enabled = self.enabled,
+                "remote_im: skip auto-start (disabled or no ready instances)"
+            );
             return Ok(());
         }
         tracing::info!("remote_im: auto-starting bridge (enabled + ready instances)");
@@ -375,8 +379,12 @@ impl BridgeRuntime {
     }
 }
 
-/// Spawn bridge health / crash-recovery loop (call once from app setup after try_autostart).
-pub fn start_health_watchdog(state: std::sync::Arc<super::RemoteImState>) {
+/// Spawn the crash-recovery loop at most once. Call from setup **only** when
+/// `should_boot_connectors` is true, and from Start / enable IPC otherwise.
+pub fn ensure_health_watchdog(state: std::sync::Arc<super::RemoteImState>) {
+    if WATCHDOG_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
     tauri::async_runtime::spawn(async move {
         // First recovery window after boot autostart.
         tokio::time::sleep(Duration::from_secs(20)).await;
@@ -431,4 +439,29 @@ pub fn doctor_report() -> serde_json::Value {
             "rateWindowSecs": super::resilience::RATE_WINDOW_SECS,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_boot_connectors;
+
+    #[test]
+    fn should_boot_connectors_skip_when_disabled_even_with_instances() {
+        assert!(!should_boot_connectors(false, true));
+    }
+
+    #[test]
+    fn should_boot_connectors_skip_when_enabled_without_instances() {
+        assert!(!should_boot_connectors(true, false));
+    }
+
+    #[test]
+    fn should_boot_connectors_skip_when_both_off() {
+        assert!(!should_boot_connectors(false, false));
+    }
+
+    #[test]
+    fn should_boot_connectors_when_enabled_and_ready() {
+        assert!(should_boot_connectors(true, true));
+    }
 }

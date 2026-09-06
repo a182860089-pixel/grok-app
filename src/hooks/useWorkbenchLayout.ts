@@ -8,8 +8,9 @@ import {
   DEFAULT_LAYOUT,
   WINDOW_CONTROLS_INSET,
   clampAsideWidth,
-  clampSidebarDragWidth,
   clampSidebarWidth,
+  liveAsideDragWidth,
+  liveSidebarDragWidth,
   isMirrorPhoneLayout,
   loadLayout,
   resolveSidebarDragEnd,
@@ -556,7 +557,7 @@ export function useWorkbenchLayout(opts?: { onAsideClose?: () => void }) {
     const onMove = (e: PointerEvent) => {
       if (isWindowFitSuppressed()) return;
       const desired = Math.round(window.innerWidth - e.clientX);
-      const next = clampAsideWidth(desired, clampOpts());
+      const next = liveAsideDragWidth(desired, clampOpts());
       if (next === liveAsideWidthRef.current) return;
       liveAsideWidthRef.current = next;
       applyLiveSplitWidth(pane, next);
@@ -622,7 +623,7 @@ export function useWorkbenchLayout(opts?: { onAsideClose?: () => void }) {
         applyCollapseLive();
         return;
       }
-      const next = clampSidebarDragWidth(desired, clampOpts());
+      const next = liveSidebarDragWidth(desired, clampOpts());
       if (next === liveSidebarWidthRef.current) return;
       liveSidebarWidthRef.current = next;
       applyLiveSplitWidth(pane, next);

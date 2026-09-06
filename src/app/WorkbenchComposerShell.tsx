@@ -12,7 +12,10 @@ import { ChatRefChip } from "@/components/ChatRefChip";
 import { ComposerAtPanel } from "@/components/ComposerAtPanel";
 import { ComposerClearDraftButton, ComposerDraftStats, ComposerSendCluster } from "@/components/ComposerDraftChrome";
 import { ComposerDraftEditor } from "@/components/ComposerDraftEditor";
-import { ComposerAccessMenu } from "@/components/ComposerModelMenu";
+import {
+  ComposerAccessMenu,
+  ComposerModelMenu,
+} from "@/components/ComposerModelMenu";
 import { ComposerPlusPanel } from "@/components/ComposerPlusPanel";
 import { ComposerQuoteCards } from "@/components/ComposerQuoteCards";
 import { ContextUsageChip } from "@/components/ContextUsageChip";
@@ -92,6 +95,18 @@ export function WorkbenchComposerShell(p: WorkbenchComposerShellProps) {
     liveSlash,
     liveVoiceOpen,
     locale,
+    modelId,
+    effort,
+    availableModels,
+    composerProviderInputs,
+    providerActiveSource,
+    providerActiveId,
+    channelEffortOptions,
+    currentModelWindow,
+    customRouteActive,
+    handleContextWindow,
+    handleModelPick,
+    handleEffortPick,
     mode,
     onComposerContextMenu,
     onComposerDraftChange,
@@ -824,6 +839,56 @@ export function WorkbenchComposerShell(p: WorkbenchComposerShellProps) {
                     </Tip>
                   );
                 })()}
+                {!phoneLayout ? (
+                  <ComposerModelMenu
+                    locale={locale}
+                    modelId={modelId}
+                    effort={effort}
+                    models={availableModels}
+                    providers={composerProviderInputs}
+                    activeSource={providerActiveSource}
+                    activeProviderId={providerActiveId}
+                    channelEfforts={channelEffortOptions}
+                    contextWindow={currentModelWindow}
+                    contextWindowEditable={customRouteActive}
+                    onContextWindow={handleContextWindow}
+                    labels={{
+                      model: tr("composer.model"),
+                      modelGroupOfficial: tr("composer.modelGroupOfficial"),
+                      modelViaProvider: tr("composer.modelViaProvider"),
+                      effort: tr("composer.effort"),
+                      effortHigh: tr("effort.high"),
+                      effortMedium: tr("effort.medium"),
+                      effortLow: tr("effort.low"),
+                      effortXhigh: tr("effort.xhigh"),
+                      effortMax: tr("effort.max"),
+                      modelSearchPlaceholder: tr(
+                        "composer.modelSearchPlaceholder",
+                      ),
+                      modelSearchEmpty: tr("composer.modelSearchEmpty"),
+                      contextWindow: tr("composer.contextWindow"),
+                      contextWindowOfficial: tr(
+                        "composer.contextWindowOfficial",
+                      ),
+                      contextWindowCustom: tr("composer.contextWindowCustom"),
+                      contextWindowPlaceholder: tr(
+                        "composer.contextWindowPlaceholder",
+                      ),
+                      contextWindowSave: tr("composer.contextWindowSave"),
+                      contextWindowOfficialHint: tr(
+                        "composer.contextWindowOfficialHint",
+                      ),
+                      advanced: tr("composer.advanced"),
+                      effortHint: tr("composer.effortPanelHint"),
+                      effortFaster: tr("composer.effortFaster"),
+                      effortSmarter: tr("composer.effortSmarter"),
+                    }}
+                    onModelPick={(pick) => {
+                      void handleModelPick(pick);
+                    }}
+                    onEffort={handleEffortPick}
+                  />
+                ) : null}
                 <ComposerSendCluster
                   attachmentsLength={attachments.length + quotes.length}
                   effectiveCanStop={effectiveCanStop}

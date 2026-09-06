@@ -7,6 +7,7 @@
 
 import { useMemo, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
+import "katex/dist/katex.min.css";
 import type { Locale } from "@/i18n";
 import {
   MARKDOWN_REHYPE_PLUGINS,

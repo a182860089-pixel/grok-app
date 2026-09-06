@@ -29,7 +29,16 @@ mod validate;
 mod weixin_flow_tests;
 mod weixin_reg;
 
-pub use bridge::BridgeRuntime;
+pub use bridge::{ensure_health_watchdog, should_boot_connectors, BridgeRuntime};
+
+/// Launch-time: only restore connectors when persisted `enabled` is on
+/// **and** a bound channel can connect. See `docs/llm-wiki/apple-motion.md`.
+pub fn should_boot_at_launch() -> bool {
+    should_boot_connectors(
+        config::load_bridge_config().enabled,
+        config::has_ready_instances(),
+    )
+}
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -164,7 +173,9 @@ pub async fn remote_im_bridge_status(
 pub async fn remote_im_bridge_start(
     state: State<'_, std::sync::Arc<RemoteImState>>,
 ) -> Result<BridgeStatusDto, String> {
-    let mut rt = state.inner.lock().await;
+    let arc = state.inner().clone();
+    ensure_health_watchdog(arc.clone());
+    let mut rt = arc.inner.lock().await;
     rt.start_async().await?;
     Ok(rt.status_dto())
 }
@@ -188,7 +199,11 @@ pub async fn remote_im_bridge_set_config(
     let mut rt = state.inner.lock().await;
     rt.set_config(enabled, lifecycle, allow_remote_yolo)?;
     if enabled == Some(true) {
+        drop(rt);
+        ensure_health_watchdog(state.inner().clone());
+        let mut rt = state.inner.lock().await;
         let _ = rt.start_async().await;
+        return Ok(rt.status_dto());
     } else if enabled == Some(false) {
         let _ = rt.stop_async().await;
     }
@@ -201,7 +216,9 @@ pub async fn remote_im_bridge_reload(
     instance_id: String,
     channel: String,
 ) -> Result<BridgeStatusDto, String> {
-    let mut rt = state.inner.lock().await;
+    let arc = state.inner().clone();
+    ensure_health_watchdog(arc.clone());
+    let mut rt = arc.inner.lock().await;
     rt.reload_async(&channel, &instance_id).await?;
     Ok(rt.status_dto())
 }
@@ -216,8 +233,6 @@ pub async fn try_autostart(state: &RemoteImState) {
         }
     }
 }
-
-pub use bridge::start_health_watchdog;
 
 #[tauri::command]
 pub async fn remote_im_test_connection(

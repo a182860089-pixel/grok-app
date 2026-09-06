@@ -66,7 +66,7 @@ describe("composer column matches chat width", () => {
     );
   });
 
-  it("splits workspace and model chips into content-sized chrome shells", () => {
+  it("keeps workspace chips above the input and the model picker inside the composer row", () => {
     expect(chat2).toMatch(
       /\.composer__chrome\s*\{[^}]*justify-content:\s*space-between/s,
     );
@@ -77,7 +77,7 @@ describe("composer column matches chat width", () => {
       /\.composer-stack\s*\{[^}]*container-name:\s*composer/s,
     );
     expect(app).toContain('className="composer__chrome"');
-    expect(app).toContain(
+    expect(app).not.toContain(
       'className="composer__model-bar composer__chip-shell"',
     );
     expect(modelMenu).not.toContain("cmm__nested");
@@ -88,23 +88,21 @@ describe("composer column matches chat width", () => {
     expect(modelMenu).not.toContain('goPane("models")');
     const modelIdx = app.indexOf("<ComposerModelMenu");
     const accessIdx = app.indexOf("<ComposerAccessMenu");
+    const sendIdx = app.indexOf("<ComposerSendCluster");
     const shellIdx = app.indexOf("ref={composerShellRef}");
     expect(modelIdx).toBeGreaterThan(-1);
     expect(accessIdx).toBeGreaterThan(-1);
-    expect(modelIdx).toBeLessThan(shellIdx);
+    expect(modelIdx).toBeGreaterThan(shellIdx);
     expect(accessIdx).toBeGreaterThan(shellIdx);
+    expect(modelIdx).toBeLessThan(sendIdx);
     expect(app.indexOf("<ComposerModelMenu", modelIdx + 1)).toBe(-1);
     expect(modelMenu).toContain("cmm__stops");
     expect(modelMenu).toMatch(
       /const triggerText = `\$\{modelLabel\} \$\{eLabel\}`/,
     );
-    expect(modelMenu).toContain("pinParent");
     expect(modelMenu).not.toContain('className="cmm--effort"');
     expect(chat2).toMatch(
-      /\.composer__model-bar:has\(\.is-open\)\s*\{[^}]*width:\s*280px/s,
-    );
-    expect(chat2).toMatch(
-      /\.composer__model-bar \.cmm__trigger\s*\{[^}]*justify-content:\s*center/s,
+      /\.composer__row \.cmm--model\s*\{[^}]*max-width:\s*min\(240px/s,
     );
   });
 

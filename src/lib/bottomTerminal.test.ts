@@ -8,6 +8,7 @@ import {
   applyBottomTerminalProjectSlice,
   bottomTerminalProjectKey,
   clampBottomTerminalHeight,
+  liveBottomTerminalHeight,
   closeAllBottomTerminalTabs,
   closeBottomTerminal,
   closeBottomTerminalTab,
@@ -59,6 +60,13 @@ describe("clampBottomTerminalHeight", () => {
   it("caps at maxPx when that max is above the minimum", () => {
     expect(clampBottomTerminalHeight(900, 300)).toBe(300);
     expect(clampBottomTerminalHeight(900, 80)).toBe(900);
+  });
+
+  it("live drag rubber-bands past maxPx", () => {
+    const live = liveBottomTerminalHeight(900, 300);
+    expect(live).toBeGreaterThan(300);
+    expect(live).toBeLessThan(900);
+    expect(liveBottomTerminalHeight(200, 300)).toBe(200);
   });
 });
 

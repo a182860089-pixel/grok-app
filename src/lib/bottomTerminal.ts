@@ -3,6 +3,8 @@
  * `open` / `height` are layout; `tabs` / `activeId` are per-project.
  */
 
+import { liveDragWidth } from "./motionSpring";
+
 export const BOTTOM_TERMINAL_TABS_MAX = 12;
 export const BOTTOM_TERMINAL_HEIGHT_DEFAULT = 240;
 export const BOTTOM_TERMINAL_HEIGHT_MIN = 120;
@@ -55,6 +57,22 @@ export function clampBottomTerminalHeight(
       ? Math.floor(maxPx)
       : Number.POSITIVE_INFINITY;
   return Math.min(cap, Math.max(min, n));
+}
+
+/** Live height while dragging the splitter — rubber-band past max. */
+export function liveBottomTerminalHeight(
+  height: number,
+  maxPx?: number,
+): number {
+  const min = BOTTOM_TERMINAL_HEIGHT_MIN;
+  const max =
+    maxPx != null && Number.isFinite(maxPx) && maxPx > min
+      ? Math.floor(maxPx)
+      : Number.POSITIVE_INFINITY;
+  if (!Number.isFinite(height)) return BOTTOM_TERMINAL_HEIGHT_DEFAULT;
+  if (height <= max && height >= min) return Math.round(height);
+  if (!Number.isFinite(max)) return Math.max(min, Math.round(height));
+  return Math.round(liveDragWidth(height, min, max, { bandMin: true }));
 }
 
 export function loadBottomTerminalHeight(

@@ -932,29 +932,29 @@ pub fn run() {
 
             }
 
-            // Remote IM: restore Feishu/Weixin connectors after App restart so
-            // already-bound channels keep receiving messages without a manual Start.
-            // Defer a short beat so the main window can paint / frontend hydrate first
-            // (Weixin long-poll + Feishu WS connect can log for a long time otherwise
-            // and looks like a hang on the last "ilink long-poll starting" line).
+            // Remote IM: restore connectors only when the user left the bridge on
+            // with bound channels. Disabled-with-credentials stays off (A0).
+            // Defer a short beat so the main window can paint first.
             {
                 use tauri::Manager;
 
                 remote_im::set_app_handle(app.handle().clone());
 
-                let rim = app.state::<Arc<remote_im::RemoteImState>>().inner().clone();
-
-                let rim_watch = rim.clone();
-
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-                    tracing::info!("remote_im: deferred autostart begin");
-                    remote_im::try_autostart(&rim).await;
-                    tracing::info!("remote_im: deferred autostart finished");
-                });
-
-                // Crash / exit recovery while bridge stays enabled.
-                remote_im::start_health_watchdog(rim_watch);
+                if remote_im::should_boot_at_launch() {
+                    let rim = app.state::<Arc<remote_im::RemoteImState>>().inner().clone();
+                    let rim_watch = rim.clone();
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                        tracing::info!("remote_im: deferred autostart begin");
+                        remote_im::try_autostart(&rim).await;
+                        tracing::info!("remote_im: deferred autostart finished");
+                    });
+                    remote_im::ensure_health_watchdog(rim_watch);
+                } else {
+                    tracing::info!(
+                        "remote_im: skip boot autostart and watchdog (not enabled)"
+                    );
+                }
             }
 
             // Headless mirror auto-start (GROK_MIRROR_HEADLESS=1) — off by default.

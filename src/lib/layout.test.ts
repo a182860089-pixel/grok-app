@@ -7,6 +7,8 @@ import {
   clampAsideWidth,
   clampSidebarDragWidth,
   clampSidebarWidth,
+  liveAsideDragWidth,
+  liveSidebarDragWidth,
   resolveSidebarDragEnd,
   asideChromeSafeMin,
   asideSurfaceFromPreviewKind,
@@ -105,6 +107,18 @@ describe("layout prefs", () => {
     expect(clampSidebarDragWidth(160)).toBe(SIDEBAR_WIDTH_MIN);
     expect(clampSidebarDragWidth(280)).toBe(280);
     expect(clampSidebarDragWidth(9999)).toBe(SIDEBAR_WIDTH_MAX);
+  });
+
+  it("live sidebar drag rubber-bands past max then release still clamps", () => {
+    const live = liveSidebarDragWidth(600);
+    expect(live).toBeGreaterThan(SIDEBAR_WIDTH_MAX);
+    expect(live).toBeLessThan(600);
+    expect(liveSidebarDragWidth(280)).toBe(280);
+    expect(liveAsideDragWidth(400)).toBe(400);
+    const asideLive = liveAsideDragWidth(2000, { viewportWidth: 1000 });
+    const asideHard = clampAsideWidth(2000, { viewportWidth: 1000 });
+    expect(asideLive).toBeGreaterThan(asideHard);
+    expect(asideLive).toBeLessThan(2000);
   });
 
   it("resolveSidebarDragEnd collapses below min, else keeps/clamps", () => {

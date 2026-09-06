@@ -13,6 +13,24 @@ export function vendorManualChunk(id: string): string | undefined {
     return "xterm";
   }
   if (
+    rest.startsWith("pdfjs-dist/") ||
+    rest.startsWith("react-pdf/")
+  ) {
+    return "pdfjs";
+  }
+  if (rest.startsWith("xlsx/") || rest.startsWith("xlsx-")) {
+    return "xlsx";
+  }
+  if (rest.startsWith("docx-preview/")) {
+    return "docx";
+  }
+  if (rest.startsWith("plyr/")) {
+    return "plyr";
+  }
+  if (rest.startsWith("highlight.js/")) {
+    return "hljs";
+  }
+  if (
     rest.startsWith("@tiptap/") ||
     rest.startsWith("tiptap-markdown/") ||
     rest.startsWith("prosemirror-")

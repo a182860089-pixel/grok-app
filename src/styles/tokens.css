@@ -71,6 +71,13 @@
   --motion-pane: 320ms;
   --motion-pane-ease: cubic-bezier(0.22, 1, 0.36, 1);
 
+  /* Apple Design contract: press on pointer-down; tracking by size.
+   * See docs/llm-wiki/apple-motion.md */
+  --press-scale: 0.88;
+  --press-ms: 80ms;
+  --track-display: -0.02em;
+  --track-ui: 0.01em;
+
   /* Solid window base — never leave transparent or theme switches flash white */
   --bg-app: #0d0d0d;
   /*
@@ -327,9 +334,69 @@
   :root {
     --motion-fast: 0ms;
     --motion-normal: 0ms;
+    --press-ms: 0ms;
+    --press-scale: 1;
     /* Keep pane interpolation. OS Reduce Motion zeroing this makes
      * click-toggle look like a hard cut. */
   }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root,
+  [data-theme="dark"],
+  [data-theme="light"] {
+    --glass-surface: var(--glass-surface-solid);
+    --glass-blur: 0px;
+    --glass-saturate: 1;
+    --sidebar-blur: 0px;
+    --sidebar-saturate: 1;
+    --bg-sidebar: var(--bg-sidebar-solid);
+    --menu-surface: var(--menu-surface-solid);
+    --menu-blur: 0px;
+    --menu-saturate: 1;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root,
+  [data-theme="dark"],
+  [data-theme="light"] {
+    --glass-surface: var(--glass-surface-solid);
+    --glass-blur: 0px;
+    --border-subtle: var(--border-strong);
+    --bg-sidebar: var(--bg-sidebar-solid);
+  }
+}
+
+/* Press-in on pointer-down (skill: respond before click). */
+.btn:active:not(:disabled),
+.chip:active:not(:disabled),
+.perm-bar__btn:active:not(:disabled),
+.icon-btn:active:not(:disabled),
+.session-row:active {
+  transform: scale(var(--press-scale));
+  filter: brightness(0.82);
+  transition:
+    transform var(--press-ms) ease-out,
+    filter var(--press-ms) ease-out;
+}
+
+.chip,
+.perm-bar__btn,
+.btn {
+  letter-spacing: var(--track-ui);
+}
+
+.settings-page__title,
+.settings-page__phone-title {
+  letter-spacing: var(--track-display);
+}
+
+.platform-win,
+.platform-linux,
+.platform-other {
+  --sidebar-blur: 0px;
+  --sidebar-saturate: 1;
 }
 
 /* Explicit light/dark choices use the browser's compositor cross-fade. */

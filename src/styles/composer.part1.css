@@ -183,6 +183,8 @@
   padding: 6px;
   overflow-x: hidden;
   overflow-y: auto;
+  isolation: isolate;
+  z-index: 13002;
   transform: translateZ(0);
   animation: cmm-fly-in-right var(--motion-pane) var(--motion-pane-ease) both;
   box-shadow:
@@ -580,11 +582,35 @@
   -webkit-appearance: none;
 }
 
+.cmm__pop--flyout[data-kind="window"] {
+  overflow: visible;
+  min-width: 228px;
+  max-width: 260px;
+  width: 240px;
+  padding: 10px;
+}
+
+.cmm__window-edit {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cmm__window-edit-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.3;
+}
+
 .cmm__inline-edit {
   display: flex;
   gap: 6px;
   align-items: center;
-  padding: 6px 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
 }
 .cmm__inline-edit input {
   flex: 1;

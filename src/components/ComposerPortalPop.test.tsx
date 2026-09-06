@@ -315,7 +315,7 @@ describe("composer chip portal pops", () => {
       return el!;
     });
     expect(flyout.parentElement).toBe(document.body);
-    expect(flyout.style.zIndex).toBe(pop!.style.zIndex);
+    expect(Number(flyout.style.zIndex)).toBeGreaterThan(Number(pop!.style.zIndex));
     expect(flyout.classList.contains("cmm__pop--flyout-models")).toBe(true);
     expect(
       screen.getByRole("searchbox", { name: "Search models" }),
@@ -393,7 +393,7 @@ describe("composer chip portal pops", () => {
     Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
     const { pos, side } = placeHubFlyout(hub, null, "effort");
     expect(side).toBe("left");
-    expect(pos.zIndex).toBe(FLOATING_MENU_Z_INDEX);
+    expect(pos.zIndex).toBe(FLOATING_MENU_Z_INDEX + 2);
     expect(pos.left).toBe("auto");
     expect(pos.right).toBe(1024 - 720 + 8);
     expect(pos.top).toBe(200);
@@ -414,6 +414,19 @@ describe("composer chip portal pops", () => {
     expect(windowFly.side).toBe("left");
     expect(windowFly.pos.top).toBe(292);
     expect(windowFly.pos.right).toBe(1024 - 720 + 8);
+    expect(Number(windowFly.pos.maxHeight)).toBeGreaterThanOrEqual(148);
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 400 });
+    const lowRow = {
+      ...hub,
+      top: 340,
+      bottom: 372,
+      y: 340,
+      height: 32,
+    } as DOMRect;
+    const lowWindow = placeHubFlyout(hub, null, "window", lowRow);
+    expect(Number(lowWindow.pos.top) + 148).toBeLessThanOrEqual(400 - 8);
+    expect(Number(lowWindow.pos.maxHeight)).toBeGreaterThanOrEqual(148);
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
     const tight = {
       ...hub,

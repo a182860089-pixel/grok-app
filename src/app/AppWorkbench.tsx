@@ -633,6 +633,14 @@ const BottomTerminal = lazy(async () => {
   const m = await import("@/components/bottom-terminal/BottomTerminal");
   return { default: m.BottomTerminal };
 });
+const WorkbenchSettingsStage = lazy(async () => {
+  const m = await import("@/app/WorkbenchSettingsStage");
+  return { default: m.WorkbenchSettingsStage };
+});
+
+function prefetchSettingsStage() {
+  void import("@/app/WorkbenchSettingsStage");
+}
 
 import {
   isTypingTarget,
@@ -643,10 +651,7 @@ import {
   quotaFromHostItem,
   type SwitcherQuota,
 } from "@/lib/accountSwitcherQuota";
-import {
-  type SettingsSectionId,
-} from "@/components/SettingsPage";
-import { isSettingsSectionId } from "@/lib/settingsCatalog";
+import { isSettingsSectionId, type SettingsSectionId } from "@/lib/settingsCatalog";
 import {
   isAccountConnected,
   loadCachedSuperGrokBrand,
@@ -732,7 +737,6 @@ import { WorkbenchSessionModals } from "@/app/WorkbenchSessionModals";
 import { WorkbenchChromeOverlays } from "@/app/WorkbenchChromeOverlays";
 import { WorkbenchComposerColumn } from "@/app/WorkbenchComposerColumn";
 import { WorkbenchFloatingMenus } from "@/app/WorkbenchFloatingMenus";
-import { WorkbenchSettingsStage } from "@/app/WorkbenchSettingsStage";
 import { WorkbenchChatStage } from "@/app/WorkbenchChatStage";
 import { useSessionExportText } from "@/hooks/useSessionExportText";
 import { useSessionExportImage } from "@/hooks/useSessionExportImage";
@@ -13222,6 +13226,24 @@ export function AppWorkbench() {
   }, [refreshAccount, refreshSavedAccounts]);
 
   useEffect(() => {
+    if (appGate !== "ready") return;
+    const w = window as Window & {
+      requestIdleCallback?: (
+        cb: () => void,
+        opts?: { timeout: number },
+      ) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    const run = () => prefetchSettingsStage();
+    if (w.requestIdleCallback) {
+      const id = w.requestIdleCallback(run, { timeout: 2500 });
+      return () => w.cancelIdleCallback?.(id);
+    }
+    const id = window.setTimeout(run, 800);
+    return () => window.clearTimeout(id);
+  }, [appGate]);
+
+  useEffect(() => {
     if (settingsOpen && settingsSection === "account") {
       void refreshAccount({ refreshBilling: true });
       void refreshSavedAccounts();
@@ -13725,6 +13747,14 @@ export function AppWorkbench() {
       {appGate === "ready" && (
       <>
       {settingsOpen ? (
+      <Suspense
+        fallback={
+          <div
+            className="app-settings-stage is-open"
+            data-testid="settings-stage"
+          />
+        }
+      >
       <WorkbenchSettingsStage
         account={account}
         accountBusy={accountBusy}
@@ -13950,6 +13980,7 @@ export function AppWorkbench() {
         workflowsEnabled={workflowsEnabled}
         zenMode={zenMode}
       />
+      </Suspense>
       ) : null}
       <div
         className={

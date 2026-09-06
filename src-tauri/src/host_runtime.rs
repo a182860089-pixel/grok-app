@@ -49,6 +49,45 @@ pub fn last_crash_path() -> PathBuf {
         .join("last_crash.txt")
 }
 
+pub fn last_crash_report_path() -> PathBuf {
+    crate::paths::app_data_root()
+        .join("logs")
+        .join("last_crash.json")
+}
+
+/// Merge unclean-restart + last_crash.txt into one report for the next boot.
+pub fn compose_crash_report(
+    unclean: &UncleanRestartRecord,
+    last_crash_txt: Option<&str>,
+    app_version: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "schema": SCHEMA,
+        "appVersion": app_version,
+        "previousPid": unclean.previous_pid,
+        "startedAt": unclean.started_at,
+        "heartbeatAt": unclean.heartbeat_at,
+        "dirtyLeaseSessionIds": unclean.dirty_lease_session_ids,
+        "lastCrashLine": last_crash_txt.map(str::trim).filter(|s| !s.is_empty()),
+    })
+}
+
+fn persist_crash_report(record: &UncleanRestartRecord) {
+    let txt = fs::read_to_string(last_crash_path()).ok();
+    let report = compose_crash_report(
+        record,
+        txt.as_deref(),
+        env!("CARGO_PKG_VERSION"),
+    );
+    let path = last_crash_report_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(raw) = serde_json::to_vec_pretty(&report) {
+        let _ = fs::write(path, raw);
+    }
+}
+
 pub fn read_runtime() -> Option<HostRuntime> {
     let raw = fs::read_to_string(runtime_path()).ok()?;
     serde_json::from_str(&raw).ok()
@@ -114,6 +153,7 @@ pub fn on_process_start() {
         if let Err(e) = append_unclean(&record) {
             tracing::warn!("unclean-restart log write failed: {e}");
         }
+        persist_crash_report(&record);
     }
     let now = chrono::Utc::now().to_rfc3339();
     let rt = HostRuntime {
@@ -219,7 +259,23 @@ mod tests {
             assert!(!rt.shutdown);
             assert_eq!(rt.pid, std::process::id());
             assert!(unclean_log_path().is_file());
+            assert!(last_crash_report_path().is_file());
         });
+    }
+
+    #[test]
+    fn compose_crash_report_includes_last_crash_and_leases() {
+        let unclean = UncleanRestartRecord {
+            previous_pid: 7,
+            started_at: "t0".into(),
+            heartbeat_at: "t1".into(),
+            dirty_lease_session_ids: vec!["abc".into()],
+        };
+        let v = compose_crash_report(&unclean, Some("  code=0xC0000005  \n"), "0.2.30");
+        assert_eq!(v["previousPid"], 7);
+        assert_eq!(v["appVersion"], "0.2.30");
+        assert_eq!(v["lastCrashLine"], "code=0xC0000005");
+        assert_eq!(v["dirtyLeaseSessionIds"][0], "abc");
     }
 
     #[test]
