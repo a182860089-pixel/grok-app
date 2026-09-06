@@ -822,6 +822,28 @@ describe("session projection", () => {
     expect(out.filter((m) => m.role === "user")).toHaveLength(1);
   });
 
+  it("applyRemoteUserMessage binds Host echo to the oldest matching optimistic bubble", () => {
+    const out = applyRemoteUserMessage(
+      [
+        { id: "u-1710000000001", role: "user", content: "hello" },
+        { id: "a-pending-1", role: "assistant", content: "", streaming: true },
+        { id: "u-1710000000002", role: "user", content: "hello" },
+        { id: "a-pending-2", role: "assistant", content: "", streaming: true },
+      ],
+      {
+        id: "host-user-1",
+        role: "user",
+        content: "hello\n\n@C:\\Users\\me\\paste.png",
+      },
+      "host-stream-1",
+    );
+    expect(out.filter((m) => m.role === "user").map((m) => m.id)).toEqual([
+      "host-user-1",
+      "u-1710000000002",
+    ]);
+    expect(out[0]!.content).not.toContain("@C:");
+  });
+
   it("applyStreamChunk grows assistant text once per chunk", () => {
     let messages: ChatMessage[] = [];
     const chunks: StreamPayload[] = [

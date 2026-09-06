@@ -21,7 +21,8 @@ export const CHAT_VIRTUALIZE_THRESHOLD_PERF = 16;
  * Smooth/plain text can still update more often; only the parse is throttled.
  * ~9×/s keeps long answers fluid without an O(n) parse per token.
  */
-export const STREAM_MARKDOWN_PARSE_MS = 110;
+/** While streaming, re-run ReactMarkdown at most this often (ms). */
+export const STREAM_MARKDOWN_PARSE_MS = 72;
 
 /**
  * Non-structural content notify throttle for the transcript store (ms).
@@ -82,8 +83,8 @@ export function resolveStreamMarkdownParseMs(
   streaming: boolean,
 ): number {
   if (!streaming) return 0;
-  if (contentLength >= 12_000) return 280;
-  if (contentLength >= STREAM_PLAIN_TEXT_CHAR_THRESHOLD) return 220;
+  if (contentLength >= 12_000) return 150;
+  if (contentLength >= STREAM_PLAIN_TEXT_CHAR_THRESHOLD) return 110;
   return STREAM_MARKDOWN_PARSE_MS;
 }
 
@@ -120,7 +121,21 @@ export function resolveMarkdownPaintSource(
   liveSource: string,
   throttledSource: string,
 ): string {
-  return streaming ? throttledSource : liveSource;
+  if (!streaming) return liveSource;
+  const live = liveSource || "";
+  const lag = throttledSource || "";
+  if (!lag) return live;
+  // Tail must not sit behind the parse timer — that's the "answer cut off"
+  // flash on stick-to-bottom / virtual list.
+  const liveLines = live.split("\n");
+  const lagLines = lag.split("\n");
+  if (
+    live.length - lag.length > 160 ||
+    liveLines.length - lagLines.length >= 2
+  ) {
+    return live;
+  }
+  return lag;
 }
 
 /** `html[data-stream-perf]` as written by AppWorkbench during a live turn. */

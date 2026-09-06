@@ -1471,6 +1471,76 @@ pub fn agent_spawn_model_id_for(composer_model: &str, route: &ActiveRoute) -> St
     }
 }
 
+/// Write `[model.<provider_id>].model = <catalog_id>` so generic OpenAI
+/// relays send that id on the wire. Spawn `--model` stays the section id
+/// (where `api_key` lives). Does **not** recycle agents.
+pub fn set_custom_provider_request_model(
+    provider_id: &str,
+    catalog_id: &str,
+) -> Result<bool, String> {
+    let pid = provider_id.trim();
+    let catalog = catalog_id.trim();
+    if pid.is_empty() || catalog.is_empty() {
+        return Ok(false);
+    }
+    let _ = ensure_agent_home()?;
+    let path = agent_config_toml();
+    if !path.exists() {
+        return Ok(false);
+    }
+    let text = read_text(&path);
+    let Some(next) = set_section_assignment(&text, pid, "model", catalog) else {
+        return Ok(false);
+    };
+    if next == text {
+        return Ok(false);
+    }
+    write_text(&path, &next)?;
+    // Sidecar GROK_HOME copies config at spawn; refresh so the next custom
+    // child does not keep the previous request model.
+    let _ = prepare_custom_inference_home();
+    tracing::info!(
+        target: "providers",
+        provider = %pid,
+        model = %catalog,
+        "updated custom section request model (no recycle)"
+    );
+    Ok(true)
+}
+
+/// Replace or insert `key = "value"` inside `[model.<section_id>]`.
+fn set_section_assignment(
+    text: &str,
+    section_id: &str,
+    key: &str,
+    value: &str,
+) -> Option<String> {
+    let sections = parse_model_sections(text);
+    let section = sections.iter().find(|s| s.id == section_id)?;
+    let mut lines: Vec<String> = text.lines().map(|s| s.to_string()).collect();
+    let line_val = format!("{key} = {}", quote(value));
+    for i in section.start + 1..section.end.min(lines.len()) {
+        if assignment_key_exact(lines[i].trim()) == Some(key) {
+            if lines[i].trim() == line_val {
+                return Some(text.to_string());
+            }
+            lines[i] = line_val;
+            let mut out = lines.join("\n");
+            if text.ends_with('\n') && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            return Some(out);
+        }
+    }
+    let insert_at = (section.start + 1).min(lines.len());
+    lines.insert(insert_at, line_val);
+    let mut out = lines.join("\n");
+    if text.ends_with('\n') && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    Some(out)
+}
+
 fn grok_build_proxy_spawn_from_text(
     text: &str,
     composer_model: &str,
@@ -3858,6 +3928,18 @@ context_window = "1000000"
             agent_spawn_model_id_for("deepseek-chat", &ActiveRoute::Custom { id: "yunyi".into() }),
             "yunyi"
         );
+    }
+
+    #[test]
+    fn set_section_assignment_updates_request_model() {
+        let src = "[model.gpt]\nmodel = \"gpt-6-astra\"\napi_key = \"k\"\n";
+        let next = set_section_assignment(src, "gpt", "model", "gpt-5.5").unwrap();
+        assert!(next.contains("model = \"gpt-5.5\""));
+        assert!(!next.contains("gpt-6-astra"));
+        assert!(next.contains("api_key = \"k\""));
+        let same = set_section_assignment(&next, "gpt", "model", "gpt-5.5").unwrap();
+        assert_eq!(same, next);
+        assert!(set_section_assignment(src, "missing", "model", "x").is_none());
     }
 
     #[test]

@@ -1,4 +1,10 @@
-import { isDisplayableAttachmentPath } from "../attachments";
+import {
+  isDisplayableAttachmentPath,
+  mergeAttachments,
+  parseAttachmentsFromContent,
+  userBodyTextForMatch,
+  type Attachment,
+} from "../attachments";
 import type {
   ChatMessage,
   MessageAttachment,
@@ -182,6 +188,37 @@ export function dedupeCurrentTurnAssistants(
  * UUID arrives, reconcile that row instead of duplicating. Mirror clients
  * that never ran local optimistic UI get the user row + a live assistant shell.
  */
+function asAttachment(a: MessageAttachment | Attachment): Attachment {
+  return {
+    path: a.path,
+    name: a.name || a.path.split(/[/\\]/).pop() || a.path,
+    isDir: !!a.isDir,
+  };
+}
+
+/** Strip Host dual-written `@/abs/path` lines so the bubble matches disk hydrate. */
+function displayUserFromJournal(user: ChatMessage): ChatMessage {
+  const parsed = parseAttachmentsFromContent(user.content || "");
+  const attachments = mergeAttachments(
+    parsed.attachments,
+    (user.attachments ?? []).map(asAttachment),
+  );
+  return {
+    ...user,
+    role: "user",
+    content: parsed.text || (attachments.length ? "" : user.content || ""),
+    attachments: attachments.length ? attachments : user.attachments,
+  };
+}
+
+/**
+ * Mirror / API / other-window sends: paint the Host user row when this client
+ * did not run local optimistic UI. Local sends reconcile optimistic `u-…`
+ * ids to the Host UUID instead of duplicating.
+ *
+ * Host `append_journal_attachment_refs` adds trailing `@C:\…paste.png` lines
+ * that the optimistic composer bubble does not have — match on body text.
+ */
 export function applyRemoteUserMessage(
   messages: ChatMessage[],
   user: ChatMessage,
@@ -192,39 +229,44 @@ export function applyRemoteUserMessage(
     return ensureLiveAssistantAfterUser(messages, user.id, streamMessageId);
   }
 
-  const userText = (user.content || "").trim();
+  const incoming = displayUserFromJournal(user);
+  const incomingBody = userBodyTextForMatch(incoming.content || user.content);
   let optimisticIdx = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (!m || m.role !== "user" || m.marker === "interjection") continue;
     const id = m.id || "";
     // Optimistic composer ids: `u-<ts>` / `u-auto-…` (see isClientOptimisticId).
-    if (
-      userText &&
-      (m.content || "").trim() === userText &&
-      (/^u-\d+$/.test(id) || id.startsWith("u-auto-"))
-    ) {
+    // Scan past later optimistic bubbles — a double-click paints two `u-<ts>`
+    // rows, and Host echo for the first send must not bind to the second.
+    if (!(/^u-\d+$/.test(id) || id.startsWith("u-auto-"))) continue;
+    if (userBodyTextForMatch(m.content) === incomingBody) {
       optimisticIdx = i;
     }
-    break;
   }
 
   let next: ChatMessage[];
   if (optimisticIdx >= 0) {
+    const optimistic = messages[optimisticIdx]!;
+    const attachments = mergeAttachments(
+      (optimistic.attachments ?? []).map(asAttachment),
+      incoming.attachments ?? [],
+    );
     next = messages.map((m, i) =>
       i === optimisticIdx
         ? {
-            ...user,
-            attachments: user.attachments?.length
-              ? user.attachments
-              : m.attachments,
+            ...incoming,
+            content: incoming.content || optimistic.content,
+            attachments: attachments.length
+              ? attachments
+              : optimistic.attachments,
           }
         : m,
     );
   } else {
-    next = [...messages, { ...user, role: "user" }];
+    next = [...messages, incoming];
   }
-  return ensureLiveAssistantAfterUser(next, user.id, streamMessageId);
+  return ensureLiveAssistantAfterUser(next, incoming.id, streamMessageId);
 }
 
 function ensureLiveAssistantAfterUser(

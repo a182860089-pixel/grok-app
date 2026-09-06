@@ -9839,15 +9839,18 @@ export function AppWorkbench() {
             targetOfficial,
             channelEffortOptions ?? officialEffortCatalog,
           );
-          setEffort(clampedOfficial);
+          if (clampedOfficial !== effort) setEffort(clampedOfficial);
+          const officialPrefs: Parameters<typeof api.composerPrefsSet>[0] = {
+            projectId: activeProject?.id ?? null,
+            sessionId: session.sessionId ?? null,
+            modelId: pick.modelId,
+            providerId: "official",
+          };
+          // Unchanged effort must not ride along — Host would retune / respawn
+          // whichever chat that effort id maps to.
+          if (clampedOfficial !== effort) officialPrefs.effort = clampedOfficial;
           void api
-            .composerPrefsSet({
-              projectId: activeProject?.id ?? null,
-              sessionId: session.sessionId ?? null,
-              modelId: pick.modelId,
-              effort: clampedOfficial,
-              providerId: "official",
-            })
+            .composerPrefsSet(officialPrefs)
             .catch((e) => showToast(String(e), 4000));
         } else {
           if (!api.isTauri()) return;
@@ -9879,15 +9882,16 @@ export function AppWorkbench() {
             nextEfforts,
             channelEffortOptions ?? officialEffortCatalog,
           );
-          setEffort(clampedCustom);
+          if (clampedCustom !== effort) setEffort(clampedCustom);
+          const customPrefs: Parameters<typeof api.composerPrefsSet>[0] = {
+            projectId: activeProject?.id ?? null,
+            sessionId: session.sessionId ?? null,
+            modelId: pick.modelId,
+            providerId: pick.providerId,
+          };
+          if (clampedCustom !== effort) customPrefs.effort = clampedCustom;
           void api
-            .composerPrefsSet({
-              projectId: activeProject?.id ?? null,
-              sessionId: session.sessionId ?? null,
-              modelId: pick.modelId,
-              effort: clampedCustom,
-              providerId: pick.providerId,
-            })
+            .composerPrefsSet(customPrefs)
             .catch((e) => showToast(String(e), 4000));
         }
       } catch (e) {

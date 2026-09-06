@@ -629,10 +629,12 @@ impl SessionManager {
         let mut acp: Option<Arc<AcpClient>> = None;
         let mut agent_sid: Option<String> = None;
         let mut route_changed = false;
+        let mut prev_catalog: Option<String> = None;
 
         {
             let mut guard = self.inner.lock();
             if let Some(s) = guard.as_mut().filter(|s| s.app_session_id == session_id) {
+                prev_catalog = s.model_id.clone();
                 s.model_id = Some(model_id.clone());
                 s.meta.model_id = Some(model_id.clone());
                 s.meta.provider_id = Some(next_provider_label.clone());
@@ -647,6 +649,7 @@ impl SessionManager {
         }
         if acp.is_none() && agent_sid.is_none() {
             if let Some(s) = self.background.lock().get_mut(session_id) {
+                prev_catalog = s.model_id.clone();
                 s.model_id = Some(model_id.clone());
                 s.meta.model_id = Some(model_id.clone());
                 s.meta.provider_id = Some(next_provider_label.clone());
@@ -662,6 +665,7 @@ impl SessionManager {
         if acp.is_none() && agent_sid.is_none() {
             let parked = self.parked.lock().remove(session_id);
             if let Some(mut p) = parked {
+                prev_catalog = p.model_id.clone();
                 p.model_id = Some(model_id.clone());
                 p.meta.model_id = Some(model_id.clone());
                 p.meta.provider_id = Some(next_provider_label.clone());
@@ -683,6 +687,7 @@ impl SessionManager {
                 .into_iter()
                 .find(|s| s.id == session_id)
             {
+                prev_catalog = meta.model_id.clone();
                 meta.model_id = Some(model_id.clone());
                 meta.provider_id = Some(next_provider_label.clone());
                 let _ = store::update_session_meta(&meta);
@@ -696,6 +701,28 @@ impl SessionManager {
             self.flush_pending_soft_respawn(app, session_id).await;
             return Ok(());
         }
+
+        // Generic custom relays: HTTP model is TOML `model =`. Passing an
+        // app_models catalog id (`gpt-5.5`) to session/set_model makes CLI
+        // look up `[model.gpt-5.5]` with no api_key → authNoContext.
+        if let crate::providers::ActiveRoute::Custom { id } = &next_route {
+            let _ = crate::providers::set_custom_provider_request_model(id, &model_id);
+            let proxy = crate::providers::grok_build_proxy_spawn_for(id, &model_id);
+            if proxy.is_none() {
+                if let (Some(acp), Some(sid)) = (acp.as_ref(), agent_sid.as_deref()) {
+                    let _ = acp.set_model_for(sid, &agent_model).await;
+                }
+                let catalog_changed = prev_catalog.as_deref() != Some(model_id.as_str());
+                if catalog_changed && acp.is_some() {
+                    self.pending_soft_respawn
+                        .lock()
+                        .insert(session_id.to_string(), "request_model".into());
+                    self.flush_pending_soft_respawn(app, session_id).await;
+                }
+                return Ok(());
+            }
+        }
+
         if let (Some(acp), Some(sid)) = (acp, agent_sid) {
             if let Err(e) = acp.set_model_for(&sid, &model_id).await {
                 tracing::warn!("session/set_model catalog id soft-fail: {e}");

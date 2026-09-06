@@ -50,7 +50,11 @@ import {
   resolveChatImageThumb,
 } from "@/lib/imageThumbClient";
 import { isFusedQueryKeyPath } from "@/lib/pathNormalize";
-import { pathBasename } from "@/lib/attachments";
+import {
+  isMediaPath,
+  pathBasename,
+  shouldReserveCitedMediaCard,
+} from "@/lib/attachments";
 import { useImageViewerOptional } from "@/components/ImageViewer";
 import { IconCopy, IconExternalLink, IconFolder } from "@/components/icons";
 import { ContextMenu, type ContextMenuItem } from "@/components/ContextMenu";
@@ -122,6 +126,17 @@ function isLocalFsPath(path: string | undefined): path is string {
   // Unix absolute or Windows drive (never a fused `t:/Users/…` query key).
   if (isFusedQueryKeyPath(path)) return false;
   return path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
+}
+
+/** Session-relative cite (`images/1.jpg` / `1.jpg`) waiting for Host / pathMap. */
+function isPendingRelativeMedia(src: string, path?: string): boolean {
+  if (isLocalFsPath(path)) return false;
+  if (src.startsWith("/") || /^[A-Za-z]:[\\/]/.test(src)) return false;
+  const t = src.trim();
+  if (!t || t.includes("://") || t.includes("..")) return false;
+  // Bare `1.jpg` is a session cite — Host maps it to `images/1.jpg`.
+  // lockFail here painted "未找到文件" before the abs path landed.
+  return shouldReserveCitedMediaCard(t) || isMediaPath(t);
 }
 
 function initialResolvedSrc(
@@ -315,7 +330,19 @@ export function ImageUi({
     };
 
     const scheduleRetry = (kind: MediaLoadErrorKind) => {
-      if (!localTarget || !shouldRetryLocalMediaFailure(kind)) {
+      if (!localTarget) {
+        // Relative session cites occupy the card while Host/pathMap resolve.
+        // lockFail here painted "未找到文件" on `images/1.jpg` before abs landed.
+        if (isPendingRelativeMedia(src, path)) {
+          setFailKind(null);
+          setLoadFailed(false);
+          setResolvedSrc(null);
+          return;
+        }
+        lockFail(kind);
+        return;
+      }
+      if (!shouldRetryLocalMediaFailure(kind)) {
         lockFail(kind);
         return;
       }

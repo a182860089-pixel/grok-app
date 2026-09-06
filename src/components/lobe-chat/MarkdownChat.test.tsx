@@ -88,6 +88,13 @@ describe("MarkdownChat", () => {
     expect(html).toContain("md-body__img-frame");
   });
 
+  it("paints bare session image cites as ImageUi cards", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownChat>{"see `1.jpg`"}</MarkdownChat>,
+    );
+    expect(html).toContain("md-body__img-frame");
+  });
+
   it("paints resolved session-relative images via path map", () => {
     const html = renderToStaticMarkup(
       <MarkdownChat imagePathMap={{ "images/1.jpg": "/sess/images/1.jpg" }}>

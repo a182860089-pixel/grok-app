@@ -1214,6 +1214,12 @@ impl SessionManager {
                 .as_deref()
                 .map(str::trim)
                 .is_some_and(|s| !s.is_empty());
+        if let crate::acp_client::SessionSpawnRoute::Custom { provider_id } = &session_route {
+            let _ = crate::providers::set_custom_provider_request_model(
+                provider_id,
+                &prefs.model_id,
+            );
+        }
         let spawn_opts = crate::acp_client::SpawnOptions {
             model_id: Some(agent_model.clone()),
             effort: Some(prefs.effort.clone()),
@@ -1546,12 +1552,11 @@ impl SessionManager {
                 {
                     tracing::warn!("acp set_mode after session open soft-fail: {e}");
                 }
-                // Catalog id first (session pick), then spawn alias (provider
-                // section id). Spawn `--model gpt` is not the same as
-                // `session/set_model gpt-5.6-sol`.
+                // Catalog vs spawn alias. Target THIS agent session — process-level
+                // "recently bound" id may belong to another App chat on a shared child.
                 Self::apply_catalog_or_spawn_model(
                     &client,
-                    None,
+                    meta.agent_session_id.as_deref(),
                     &prefs.model_id,
                     &agent_model,
                 )
@@ -1938,8 +1943,12 @@ impl SessionManager {
     }
 
     /// Apply the session catalog model, falling back to the spawn alias.
-    /// Custom children are spawned with `--model <provider_id>`; ACP
-    /// `session/set_model` still needs the `app_models` catalog id.
+    ///
+    /// Official / Grok Build proxy: catalog id first (`gpt-5.5`), then section.
+    /// Generic custom relays: **section id only**. Catalog ids are not
+    /// `[model.*]` sections; `session/set_model gpt-5.5` looks up a missing
+    /// table with no `api_key` (authNoContext / thinking-only empty replies).
+    /// HTTP request model is TOML `[model.<section>].model`.
     async fn apply_catalog_or_spawn_model(
         acp: &AcpClient,
         agent_session_id: Option<&str>,
@@ -1948,7 +1957,19 @@ impl SessionManager {
     ) {
         let catalog = catalog_id.trim();
         let spawn = spawn_alias.trim();
-        let first = if !catalog.is_empty() { catalog } else { spawn };
+        let generic_custom = crate::providers::is_custom_provider_id(spawn)
+            && crate::providers::grok_build_proxy_spawn_for(spawn, catalog).is_none();
+        let first = if generic_custom {
+            if !spawn.is_empty() {
+                spawn
+            } else {
+                catalog
+            }
+        } else if !catalog.is_empty() {
+            catalog
+        } else {
+            spawn
+        };
         if first.is_empty() {
             return;
         }
@@ -1964,7 +1985,7 @@ impl SessionManager {
         if let Err(e) = first_res {
             tracing::warn!("session/set_model catalog id soft-fail: {e}");
         }
-        if spawn.is_empty() || spawn == first {
+        if generic_custom || spawn.is_empty() || spawn == first {
             return;
         }
         let fallback = match agent_session_id.filter(|s| !s.is_empty()) {

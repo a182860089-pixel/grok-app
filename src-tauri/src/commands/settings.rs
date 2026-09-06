@@ -347,11 +347,10 @@ pub async fn composer_prefs_set(
     // Prefer explicit ids; fall back to live session context.
     let (live_proj, live_sess) = mgr.current_context_ids();
     let project_id = project_id.or(live_proj);
-    // Effort is per-chat, so a draft (`sessionId: null`) must keep its `None`:
-    // falling back to the live session wrote the draft's effort into whichever
-    // chat was still running and soft-respawned that agent. Drafts seed the
-    // global default instead, and the row is written once the chat exists.
-    let session_id = if effort.is_some() {
+    // Draft (`sessionId: null`) must stay None for model AND effort. Falling
+    // back to the live session wrote the pick into whichever chat was still
+    // running and soft-respawned that agent (paused other conversations).
+    let session_id = if effort.is_some() || model_id.is_some() {
         session_id
     } else {
         session_id.or(live_sess)

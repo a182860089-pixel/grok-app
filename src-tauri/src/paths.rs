@@ -205,19 +205,29 @@ pub fn percent_encode_path_component(s: &str) -> String {
     out
 }
 
-/// Locate the on-disk agent session directory for a given agent session id.
-/// Layout: `{GROK_HOME}/sessions/{percent-encoded-cwd}/{agent_session_id}/`
+/// GROK_HOME roots that may hold `sessions/<cwd>/<agentSessionId>/images`.
 ///
-/// `cwd_hint` (project path) avoids a directory scan when known.
-pub fn find_agent_session_dir(
+/// Custom relays write into App `agent-home` even when `session_data_mode=shared`
+/// (inference home). Official shared still uses `~/.grok`. Chat cards must search
+/// both so `images/1.jpg` is not a gray "未找到文件" card.
+pub fn grok_home_candidates(session_data_mode: &str) -> Vec<PathBuf> {
+    let primary = resolve_agent_grok_home(session_data_mode);
+    let agent_home = agent_home_dir();
+    let shared = crate::process_util::user_home().join(".grok");
+    let mut out = Vec::with_capacity(3);
+    for p in [primary, agent_home, shared] {
+        if !out.iter().any(|x| x == &p) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+fn find_agent_session_dir_in_home(
+    home: &Path,
     agent_session_id: &str,
     cwd_hint: Option<&str>,
-    session_data_mode: &str,
 ) -> Option<PathBuf> {
-    if agent_session_id.is_empty() {
-        return None;
-    }
-    let home = resolve_agent_grok_home(session_data_mode);
     let sessions = home.join("sessions");
     if !sessions.is_dir() {
         return None;
@@ -231,7 +241,6 @@ pub fn find_agent_session_dir(
         }
     }
 
-    // Fallback: scan cwd folders for this agent session id
     let Ok(entries) = fs::read_dir(&sessions) else {
         return None;
     };
@@ -246,6 +255,49 @@ pub fn find_agent_session_dir(
         }
     }
     None
+}
+
+/// Locate the on-disk agent session directory for a given agent session id.
+/// Layout: `{GROK_HOME}/sessions/{percent-encoded-cwd}/{agent_session_id}/`
+///
+/// `cwd_hint` (project path) avoids a directory scan when known.
+/// Searches `~/.grok` **and** App `agent-home` so custom-route media resolves.
+pub fn find_agent_session_dir(
+    agent_session_id: &str,
+    cwd_hint: Option<&str>,
+    session_data_mode: &str,
+) -> Option<PathBuf> {
+    find_all_agent_session_dirs(agent_session_id, cwd_hint, session_data_mode)
+        .into_iter()
+        .next()
+}
+
+/// Every GROK_HOME copy of this agent session (shared CLI home + agent-home).
+pub fn find_all_agent_session_dirs(
+    agent_session_id: &str,
+    cwd_hint: Option<&str>,
+    session_data_mode: &str,
+) -> Vec<PathBuf> {
+    if agent_session_id.is_empty() {
+        return Vec::new();
+    }
+    grok_home_candidates(session_data_mode)
+        .into_iter()
+        .filter_map(|home| find_agent_session_dir_in_home(&home, agent_session_id, cwd_hint))
+        .collect()
+}
+
+fn is_media_basename(name: &str) -> bool {
+    let ext = Path::new(name)
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        ext.as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "svg" | "heic" | "avif"
+            | "mp4" | "webm" | "mov" | "mkv" | "m4v" | "avi" | "ogv" | "mpeg" | "mpg"
+    )
 }
 
 /// Join agent session root + relative path like `images/1.jpg`.
@@ -278,6 +330,37 @@ pub fn resolve_session_relative_media(session_root: &Path, relative: &str) -> Op
     } else {
         None
     }
+}
+
+/// Resolve a session-relative media cite against several roots.
+/// Tries the exact relative first, then `images/` / `videos/` / `outputs/` + basename.
+pub fn resolve_relative_media_in_roots(relative: &str, roots: &[PathBuf]) -> Option<PathBuf> {
+    for root in roots {
+        if let Some(full) = resolve_session_relative_media(root, relative) {
+            return Some(full);
+        }
+    }
+    let name = Path::new(relative.trim().trim_start_matches("./"))
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .trim();
+    if name.is_empty() || name == "." || name == ".." || !is_media_basename(name) {
+        return None;
+    }
+    for root in roots {
+        for sub in ["images", "videos", "outputs"] {
+            let cand = root.join(sub).join(name);
+            if cand.is_file() {
+                return Some(cand);
+            }
+        }
+        let cand = root.join(name);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -345,5 +428,37 @@ mod tests {
         assert!(needs_agent_home_spawn_prep("independent", true));
         assert!(!needs_agent_home_spawn_prep("Shared", false));
         assert!(needs_agent_home_spawn_prep("SHARED", true));
+    }
+
+    #[test]
+    fn grok_home_candidates_include_agent_home_and_shared() {
+        let list = grok_home_candidates("shared");
+        assert!(
+            list.iter().any(|p| p.ends_with(".grok") || p.ends_with("agent-home")),
+            "shared mode still lists both homes: {list:?}"
+        );
+        assert!(list.iter().any(|p| p.ends_with("agent-home")));
+        let indep = grok_home_candidates("independent");
+        assert!(indep.iter().any(|p| p.ends_with("agent-home")));
+        assert!(indep.iter().any(|p| p.ends_with(".grok")));
+    }
+
+    #[test]
+    fn resolve_relative_media_basename_fallback() {
+        let tmp = std::env::temp_dir().join(format!(
+            "grok-media-roots-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let images = tmp.join("images");
+        std::fs::create_dir_all(&images).unwrap();
+        let file = images.join("1.jpg");
+        std::fs::write(&file, b"x").unwrap();
+        let got = resolve_relative_media_in_roots("images/1.jpg", &[tmp.clone()]);
+        assert_eq!(got.as_deref(), Some(file.as_path()));
+        let by_name = resolve_relative_media_in_roots("1.jpg", &[tmp.clone()]);
+        assert_eq!(by_name.as_deref(), Some(file.as_path()));
+        assert!(resolve_relative_media_in_roots("../1.jpg", &[tmp.clone()]).is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

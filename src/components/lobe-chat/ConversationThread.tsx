@@ -336,10 +336,12 @@ const AssistantMessageBody = memo(function AssistantMessageBody({
 
   const findActiveHere = !!findQuery?.trim();
   const canSpill =
+    !streaming &&
     shouldSpillLongAssistant(
       (displayContent || "").length,
       detectAppPlatform(),
-    ) && !findActiveHere;
+    ) &&
+    !findActiveHere;
   const spill = canSpill && !showFullReply;
   const markdownSource = spill
     ? previewLongAssistant(displayContent || "")

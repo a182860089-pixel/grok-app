@@ -101,6 +101,15 @@ export function parseAttachmentsFromContent(content: string): {
 }
 
 /**
+ * User-bubble body used to match optimistic `u-<ts>` rows against Host journal
+ * rows. Host dual-writes trailing `@/abs/path` lines onto content; those must
+ * not create a second bubble.
+ */
+export function userBodyTextForMatch(content: string | null | undefined): string {
+  return parseAttachmentsFromContent(content ?? "").text.trim();
+}
+
+/**
  * Dual-write sole-line `@/abs/path` refs onto display/journal content (idempotent).
  * Mirrors host `append_journal_attachment_refs`: keeps internal body blank lines;
  * normalizes only a trailing blank run before the attachment block.
@@ -709,13 +718,19 @@ export function collectSessionRelativeMediaRefs(
  * paint (fixed 150px height, width from the local aspect cache). Path may
  * still resolve later — occupancy must not wait on that IPC.
  */
-export function shouldReserveCitedMediaCard(token: string): boolean {
+export function shouldReserveCitedMediaCard(
+  token: string,
+  _pathMap?: Record<string, string> | null,
+): boolean {
   const t = token.trim().replace(/^<|>$/g, "");
   if (!t || t.length > 260) return false;
   if (t.includes("://") || t.includes("..")) return false;
   if (t.startsWith("/") || /^[A-Za-z]:[\\/]/.test(t)) return false;
   if (isSiteRootAbsolutePath(t) || isFusedQueryKeyPath(t)) return false;
-  return isMediaPath(t);
+  if (!isMediaPath(t)) return false;
+  // Bare `1.jpg` still occupies the 150px card while Host resolves via
+  // `images/` basename fallback. Tick/link extractors already filtered prose.
+  return true;
 }
 
 /** @deprecated use collectSessionRelativeMediaRefs */

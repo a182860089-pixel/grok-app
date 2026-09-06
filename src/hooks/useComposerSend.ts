@@ -94,6 +94,8 @@ export type ExecuteSendOpts = {
   fromQueue?: boolean;
   targetSessionId?: string | null;
   agentTextOverride?: string;
+  /** Caller already holds the per-session send claim (composer click). */
+  alreadyClaimed?: boolean;
 };
 
 export type ComposerSendQueueApi = {
@@ -271,6 +273,7 @@ const executeSend = async (opts: {
   fromQueue?: boolean;
   targetSessionId?: string | null;
   agentTextOverride?: string;
+  alreadyClaimed?: boolean;
 }): Promise<boolean> => {
   // Session-keyed pool: secondary may send via shared Host (session-targeted).
   if (!canLiveParticipate(isSecondaryWindowRef.current)) {
@@ -279,7 +282,6 @@ const executeSend = async (opts: {
   }
   const { storedDisplay, att, goalMode: useGoal, fromQueue } = opts;
   const quotesForSend = opts.quotes ?? [];
-  if (!fromQueue) await effortApplyRef.current;
   const segments = parseStoredContent(storedDisplay);
   if (isDraftEmpty(segments) && !att.length && !quotesForSend.length) {
     sendInFlightRef.current = false;
@@ -296,9 +298,9 @@ const executeSend = async (opts: {
           shellSessionId: session.sessionId,
         });
   const sendKey = queueSessionKey(sendTargetId);
-  if (!claimSendForSession(sendTargetId)) return false;
-  // A prior Stop may still be holding force_idle (Host lag). New turn owns Stop/Send.
-  clearStopLatch();
+  // Claim BEFORE any await. Waiting on effortApply first let a double-click
+  // paint two optimistic bubbles and fire two session_send calls.
+  if (!opts.alreadyClaimed && !claimSendForSession(sendTargetId)) return false;
   const heldSendKeys = new Set<string>([sendKey]);
   const sendEpoch = (sendEpochBySessionRef.current.get(sendKey) ?? 0) + 1;
   sendEpochBySessionRef.current.set(sendKey, sendEpoch);
@@ -307,6 +309,22 @@ const executeSend = async (opts: {
     [...heldSendKeys].every(
       (key) => sendEpochBySessionRef.current.get(key) === sendEpoch,
     );
+  const releaseSendClaim = () => {
+    for (const key of heldSendKeys) {
+      if (sendEpochBySessionRef.current.get(key) !== sendEpoch) continue;
+      sendInFlightBySessionRef.current.delete(key);
+      sendEpochBySessionRef.current.delete(key);
+    }
+    sendInFlightRef.current = sendInFlightBySessionRef.current.size > 0;
+  };
+  try {
+    if (!fromQueue) await effortApplyRef.current;
+  } catch (e) {
+    releaseSendClaim();
+    throw e;
+  }
+  // A prior Stop may still be holding force_idle (Host lag). New turn owns Stop/Send.
+  clearStopLatch();
   // Prefer viewing id over shell sessionId — openSession points viewing at
   // the new chat before journal load finishes setSession; using only shell
   // mis-routed sends into the previous (often stuck) chat.
@@ -889,6 +907,13 @@ const send = async () => {
   // ensureConnected / sessionSend (that left the prompt sitting in the
   // composer for seconds). Persist + fail-restore settle after executeSend.
   const originView = currentViewFocus();
+  const sendTargetId = resolveComposerSendSessionId({
+    viewingSessionId: originView.sessionId,
+    shellSessionId: session.sessionId,
+  });
+  // Claim before clearing the composer so a double Enter / double-click
+  // cannot pass the empty check twice and restore the prompt on the loser.
+  if (!claimSendForSession(sendTargetId)) return;
   resetComposerUiAfterSubmit();
 
   const sent = await executeSend({
@@ -896,6 +921,8 @@ const send = async () => {
     att,
     quotes: sendQuotes,
     goalMode,
+    alreadyClaimed: true,
+    targetSessionId: sendTargetId,
   });
   if (sent && refs.length) {
     showToastRef.current(
@@ -915,10 +942,6 @@ const send = async () => {
     currentText: getDraft(),
     currentAttachments: attachmentsRef.current,
     currentQuotes: quotesRef.current,
-  });
-  const sendTargetId = resolveComposerSendSessionId({
-    viewingSessionId: originView.sessionId,
-    shellSessionId: session.sessionId,
   });
   const stillHere = isViewingSendTarget(
     originView,

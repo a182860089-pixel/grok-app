@@ -478,11 +478,11 @@ export const MarkdownChat = memo(function MarkdownChat({
     // resolves. FilePathCard paints unresolved relatives as gray inline code
     // (`![image](images/1.jpg)` / `images/1.jpg`) — that is the chat-image bug.
     const reserveTok =
-      (citedMedia && shouldReserveCitedMediaCard(citedMedia)
+      (citedMedia && shouldReserveCitedMediaCard(citedMedia, imagePathMap)
         ? citedMedia
         : null) ||
-      (shouldReserveCitedMediaCard(raw) ? raw : null) ||
-      (shouldReserveCitedMediaCard(rawIn) ? rawIn : null);
+      (shouldReserveCitedMediaCard(raw, imagePathMap) ? raw : null) ||
+      (shouldReserveCitedMediaCard(rawIn, imagePathMap) ? rawIn : null);
     if (reserveTok && isImagePath(reserveTok)) {
       return (
         <ImageUi
@@ -695,7 +695,11 @@ export const MarkdownChat = memo(function MarkdownChat({
         );
         if (card) return card;
         const cited = unwrapCitedMediaToken(src);
-        if (cited && shouldReserveCitedMediaCard(cited) && isImagePath(cited)) {
+        if (
+          cited &&
+          shouldReserveCitedMediaCard(cited, imagePathMap) &&
+          isImagePath(cited)
+        ) {
           return (
             <ImageUi
               className="md-body__img md-body__img--card"
@@ -705,7 +709,11 @@ export const MarkdownChat = memo(function MarkdownChat({
             />
           );
         }
-        if (cited && shouldReserveCitedMediaCard(cited) && isVideoPath(cited)) {
+        if (
+          cited &&
+          shouldReserveCitedMediaCard(cited, imagePathMap) &&
+          isVideoPath(cited)
+        ) {
           return (
             <VideoUi
               key={cited}

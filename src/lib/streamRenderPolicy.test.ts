@@ -59,6 +59,13 @@ describe("streamRenderPolicy", () => {
     expect(resolveMarkdownPaintSource(false, "final", "final")).toBe("final");
   });
 
+  it("streaming markdown jumps to live when the throttle is more than a line behind", () => {
+    const live = "one\ntwo\nthree\nfour";
+    const lag = "one\ntwo";
+    expect(resolveMarkdownPaintSource(true, live, lag)).toBe(live);
+    expect(resolveMarkdownPaintSource(true, "abc", "ab")).toBe("ab");
+  });
+
   it("overscan scale shrinks only while streaming", () => {
     expect(resolveStreamOverscanScale(false, 12)).toBe(1);
     expect(resolveStreamOverscanScale(true, 12)).toBeLessThan(1);

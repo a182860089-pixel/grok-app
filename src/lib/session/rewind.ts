@@ -5,6 +5,7 @@ import {
   contentLooksLikeThought,
   syncContentIntoSegments,
 } from "./segments";
+import { userBodyTextForMatch } from "../attachments";
 
 export function truncateBeforeLastUser(messages: ChatMessage[]): ChatMessage[] {
   let cut = messages.length;
@@ -307,7 +308,7 @@ export function reconcileOptimisticDuplicates(
   const realUsersByContent = new Map<string, ChatMessage>();
   for (const m of messages) {
     if (m.role === "user" && !isClientOptimisticId(m.id)) {
-      const key = m.content.trim();
+      const key = userBodyTextForMatch(m.content);
       if (key && !realUsersByContent.has(key)) {
         realUsersByContent.set(key, m);
       }
@@ -324,7 +325,7 @@ export function reconcileOptimisticDuplicates(
 
   for (const m of messages) {
     if (m.role === "user" && isClientOptimisticId(m.id)) {
-      const real = realUsersByContent.get(m.content.trim());
+      const real = realUsersByContent.get(userBodyTextForMatch(m.content));
       if (real) {
         if (!placedRealUserIds.has(real.id)) {
           out.push(real);
