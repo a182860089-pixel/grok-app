@@ -3,7 +3,7 @@
  * banner, a11y live region, and ConversationThreadLive. Composer is passed
  * as children so it stays inside main__stage.
  */
-import type { CSSProperties } from "react";
+import { lazy, Suspense, type CSSProperties } from "react";
 import * as api from "@/lib/api";
 import type { MessageKey } from "@/i18n";
 import { pathsEqual } from "@/lib/gitWorktree";
@@ -21,7 +21,10 @@ import {
 import { goalOrchPhaseLabelKey } from "@/lib/goalOrch";
 import { AttachedChatLookupContext } from "@/components/AttachedChatLookup";
 import { UiErrorBoundary } from "@/components/UiErrorBoundary";
-import { ConversationThreadLive } from "@/components/lobe-chat";
+const ConversationThreadLive = lazy(async () => {
+  const m = await import("@/components/lobe-chat/ConversationThreadLive");
+  return { default: m.ConversationThreadLive };
+});
 import { GoalOrchSessionChip } from "@/components/GoalOrchSessionChip";
 import { PlanStatusBar } from "@/components/PlanStatusBar";
 import { ChatFindLive } from "@/components/ChatFindLive";
@@ -441,6 +444,7 @@ export function WorkbenchChatStage(p: WorkbenchChatStageProps) {
               retry: tr("ui.errorBoundary.retry"),
             }}
           >
+          <Suspense fallback={null}>
           <ConversationThreadLive
             onContinueInterrupted={onThreadContinueInterrupted}
             onAddQuote={onThreadAddQuote}
@@ -492,6 +496,7 @@ export function WorkbenchChatStage(p: WorkbenchChatStageProps) {
             structuredOutputUsage={structuredOutputUsage}
             structuredOutputLabels={structuredOutputLabels}
           />
+          </Suspense>
           </UiErrorBoundary>
           </AttachedChatLookupContext.Provider>
           {children}

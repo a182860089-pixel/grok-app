@@ -765,7 +765,6 @@ pub fn run() {
             // try_state / soft-fail until ready (ensureMediaEndpoint retries).
             {
                 let handle = app.handle().clone();
-                let session_mgr = app.state::<Arc<SessionManager>>().inner().clone();
                 tauri::async_runtime::spawn(async move {
                     match media_server::start().await {
                         Ok(h) => {
@@ -779,18 +778,6 @@ pub fn run() {
                             tracing::error!(
                                 error = %e,
                                 "media server failed to start — local media previews may break"
-                            );
-                        }
-                    }
-                    match session_api::start(handle.clone(), session_mgr).await {
-                        Ok(h) => {
-                            tracing::info!(url = %h.url, "session api ready");
-                            handle.manage(h);
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                error = %e,
-                                "session api failed to start — external list/send is unavailable"
                             );
                         }
                     }
@@ -817,6 +804,28 @@ pub fn run() {
                             tracing::warn!(
                                 error = %e,
                                 "relay stream proxy base_url repair join failed"
+                            );
+                        }
+                    }
+                });
+            }
+
+            // External `--sessions` CLI talks to this listener. Delay so first
+            // paint and media HTTP are not competing for bind/thread.
+            {
+                let handle = app.handle().clone();
+                let session_mgr = app.state::<Arc<SessionManager>>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+                    match session_api::start(handle.clone(), session_mgr).await {
+                        Ok(h) => {
+                            tracing::info!(url = %h.url, "session api ready");
+                            handle.manage(h);
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "session api failed to start — external list/send is unavailable"
                             );
                         }
                     }

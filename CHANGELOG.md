@@ -15,6 +15,7 @@ See `docs/llm-wiki/release.md`.
 
 ### Changed
 - The in-app browser MCP listener starts on the first session connect or the first Browser tab, not at app launch.
+- The local session API binds 2.5s after launch so it does not contend with first paint. The chat transcript chunk loads with the chat stage instead of the first JS payload.
 - Remote IM no longer auto-starts or runs a health loop when the bridge is off. Bound credentials do not flip it back on; Start in Settings still restores it.
 - Buttons, chips, and permission actions press in on pointer-down. Frosted glass becomes solid when the OS asks for reduced transparency.
 - Settings, Office previewers, and the terminal no longer ride in the first JS payload. The workbench prefetches Settings after idle so the first open still has no blank cut.
@@ -22,6 +23,7 @@ See `docs/llm-wiki/release.md`.
 
 **中文 · 变更**
 - 内嵌浏览器 MCP 改到第一次连会话或第一次打开 Browser 标签才监听，开机不再占端口。
+- 本机会话 API 推迟 2.5 秒再监听，聊天记录模块跟聊天舞台一起加载，不进第一包 JS。
 - 远程 IM 在 Bridge 关闭时不再自动拉起，也不再跑健康检查。磁盘上的凭据不会把它重新打开；设置里点启动仍会恢复。
 - 按钮、芯片和权限操作在按下时就会缩一下。系统要求降低透明度时，毛玻璃改走实心底。
 - 设置、Office 预览和终端不再跟第一包 JS 一起下来。工作台空闲后会预取设置，第一次打开仍不会空一截。
