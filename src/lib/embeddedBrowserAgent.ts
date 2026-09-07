@@ -3,6 +3,8 @@
  * `resource-browser-*` WebView the user is looking at.
  */
 
+import { DEFAULT_BROWSER_URL } from "@/lib/sshLoopbackUrl";
+
 export const EMBEDDED_BROWSER_AGENT_OPEN_EVENT = "side-browser://agent-open";
 
 export type EmbeddedBrowserAgentOpenPayload = {
@@ -15,5 +17,5 @@ export function agentOpenUrl(
   payload: EmbeddedBrowserAgentOpenPayload | null | undefined,
 ): string {
   const u = (payload?.url || "").trim();
-  return u || "about:blank";
+  return u || DEFAULT_BROWSER_URL;
 }

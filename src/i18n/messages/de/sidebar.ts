@@ -27,6 +27,7 @@ export const deSidebar = {
   "sidebar.relocateProject": "Ordner neu zuordnen…",
   "sidebar.noChats": "Keine Chats",
   "sidebar.otherSessions": "Andere",
+  "sidebar.pinned": "Angeheftet",
   "sidebar.dateGroup.today": "Heute",
   "sidebar.dateGroup.yesterday": "Gestern",
   "sidebar.dateGroup.previous7": "Letzte 7 Tage",

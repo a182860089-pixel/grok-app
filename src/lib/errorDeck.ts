@@ -412,7 +412,12 @@ export function looksLikeRateLimit(
     s.includes("too many requests") ||
     s.includes("429") ||
     s.includes("retry later") ||
-    s.includes("slow down")
+    s.includes("slow down") ||
+    s.includes("high demand") ||
+    s.includes("experiencing high") ||
+    s.includes("currently experiencing") ||
+    s.includes("try again later") ||
+    s.includes("overloaded")
   );
 }
 

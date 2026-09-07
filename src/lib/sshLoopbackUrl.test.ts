@@ -76,9 +76,9 @@ describe("normalizeBrowserUrl", () => {
     );
   });
 
-  it("uses about:blank for an empty new tab and keeps about: URLs", () => {
-    expect(normalizeBrowserUrl("")).toBe("about:blank");
-    expect(normalizeBrowserUrl("   ")).toBe("about:blank");
+  it("loads a real page for an empty new tab and keeps about: URLs", () => {
+    expect(normalizeBrowserUrl("")).toBe("https://example.com");
+    expect(normalizeBrowserUrl("   ")).toBe("https://example.com");
     expect(normalizeBrowserUrl("about:blank")).toBe("about:blank");
   });
 });

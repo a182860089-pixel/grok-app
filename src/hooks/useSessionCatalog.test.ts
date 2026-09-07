@@ -52,6 +52,22 @@ describe("sessionSidebarSelectOrder", () => {
       "orphan",
     ]);
   });
+
+  it("lifts pinned orphans above project chats", () => {
+    const sessions = [
+      row({ id: "proj", projectId: "p1", updatedAt: "2026-01-03T00:00:00Z" }),
+      row({
+        id: "pin-orphan",
+        projectId: null,
+        pinned: true,
+        updatedAt: "2026-01-01T00:00:00Z",
+      }),
+    ];
+    expect(sessionSidebarSelectOrder(sessions, [{ id: "p1" }])).toEqual([
+      "pin-orphan",
+      "proj",
+    ]);
+  });
 });
 
 describe("useSessionCatalog", () => {

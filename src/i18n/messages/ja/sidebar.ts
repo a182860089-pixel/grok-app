@@ -27,6 +27,7 @@ export const jaSidebar = {
   "sidebar.relocateProject": "フォルダーを再設定…",
   "sidebar.noChats": "チャットなし",
   "sidebar.otherSessions": "その他",
+  "sidebar.pinned": "ピン留め",
   "sidebar.dateGroup.today": "今日",
   "sidebar.dateGroup.yesterday": "昨日",
   "sidebar.dateGroup.previous7": "過去 7 日間",

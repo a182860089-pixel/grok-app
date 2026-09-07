@@ -346,6 +346,11 @@ impl SessionManager {
     /// Drop all in-turn busy markers after a terminal turn failure.
     /// Complements FSM `fail_with` (which only flips state + last_error).
     pub(super) fn release_failed_turn_markers(s: &mut LiveSession, app: Option<&AppHandle>) {
+        // Durable the already-streamed assistant/thought *before* dropping
+        // buffers. A retry abort / host interrupt used to clear stream_buf
+        // without a force flush, so the chat lost every token that had
+        // already been painted.
+        Self::maybe_flush_stream_journal(s, true, false);
         // Flush the last coalesced tokens before dropping the buffer (P0-1 / P1-9).
         // No done flag: the error / fail_with state should win over a fake Ready.
         if let Some(app) = app {
@@ -1423,15 +1428,29 @@ impl SessionManager {
     }
 
     /// Persist + push a chat-visible error for a failed turn (retries exhausted, RPC fail, …).
-    /// Updates UI via `session://turn_error` so the optimistic thinking bubble becomes a record.
+    /// Updates UI via `session://turn_error`.
+    ///
+    /// If the turn already streamed assistant/thought/tools, keep that row and
+    /// append the error as a **new** message. Reusing `streaming_message_id`
+    /// used to overwrite the body so a high-demand / interrupt wiped every
+    /// token that had already been painted.
     ///
     /// Content is intentionally short (code + compact reason). The UI maps codes to i18n copy
     /// and must not dump raw RPC/MCP stderr into the chat bubble.
     pub(super) fn record_turn_error(s: &mut LiveSession, app: &AppHandle, err: &AgentError) {
-        let mid = s
-            .streaming_message_id
-            .clone()
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        Self::maybe_flush_stream_journal(s, true, false);
+        let keep_stream = !s.stream_buf.is_empty()
+            || !s.stream_thought.is_empty()
+            || !s.stream_attachments.is_empty()
+            || s.tools_this_turn > 0
+            || !s.open_tool_ids.is_empty();
+        let mid = if keep_stream {
+            Uuid::new_v4().to_string()
+        } else {
+            s.streaming_message_id
+                .clone()
+                .unwrap_or_else(|| Uuid::new_v4().to_string())
+        };
         let code = err.code.as_str();
         let detail = sanitize_error_detail(err.message.trim());
         // Persist machine-readable code first so the frontend can i18n the summary.

@@ -27,6 +27,7 @@ export const ruSidebar = {
   "sidebar.relocateProject": "Указать новую папку…",
   "sidebar.noChats": "Нет чатов",
   "sidebar.otherSessions": "Другие",
+  "sidebar.pinned": "Закреплённые",
   "sidebar.dateGroup.today": "Сегодня",
   "sidebar.dateGroup.yesterday": "Вчера",
   "sidebar.dateGroup.previous7": "Предыдущие 7 дней",

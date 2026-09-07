@@ -18,7 +18,6 @@ import {
   IconChevronRight,
   IconHelp,
   IconSettings,
-  IconSparkles,
   IconThemeMoon,
   IconThemeSun,
 } from "@/components/icons";
@@ -69,8 +68,6 @@ export interface UserMenuProps {
   locale: string;
   labels: {
     settings: string;
-    /** Optional what's-new entry (account menu, above the tour). */
-    whatsNew?: string;
     /** Optional product tour entry label */
     tutorial?: string;
     theme: string;
@@ -108,8 +105,6 @@ export interface UserMenuProps {
   onRefreshProviderBalance?: () => void;
   onSettings: () => void;
   onAccountSettings: () => void;
-  /** Re-open the current version's update notes. */
-  onWhatsNew?: () => void;
   /** Open optional in-app product tour */
   onTutorial?: () => void;
   onTheme: (preference: ThemePreference) => void;
@@ -183,7 +178,6 @@ export function UserMenu({
   onRefreshProviderBalance,
   onSettings,
   onAccountSettings,
-  onWhatsNew,
   onTutorial,
   onTheme,
   onThemeEditor,
@@ -701,21 +695,6 @@ export function UserMenu({
                 </kbd>
               ) : null}
             </button>
-
-            {onWhatsNew && labels.whatsNew ? (
-              <button
-                type="button"
-                className="user-menu__item"
-                role="menuitem"
-                onClick={() => {
-                  onClose();
-                  onWhatsNew();
-                }}
-              >
-                <IconSparkles size={16} />
-                <span>{labels.whatsNew}</span>
-              </button>
-            ) : null}
 
             {onTutorial && labels.tutorial ? (
               <button

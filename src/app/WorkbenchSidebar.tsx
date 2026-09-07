@@ -13,7 +13,6 @@ import {
 import { Tip } from "@/components/ui/tooltip";
 import { PaneToggleButton } from "@/components/PaneToggleButton";
 import { SidebarBrand } from "@/components/SidebarBrand";
-import { SidebarUpdateButton } from "@/components/SidebarUpdateButton";
 import { ThemeEditorModal } from "@/components/ThemeEditorModal";
 import { UserMenu, remainingPercent } from "@/components/UserMenu";
 import { GrokLogo } from "@/components/GrokLogo";
@@ -51,7 +50,6 @@ import {
 } from "@/lib/layout";
 import { paneSplitSizeStyle } from "@/lib/paneSplitMotion";
 import type { Theme, ThemePreference } from "@/lib/theme";
-import { requestWhatsNewOpen } from "@/lib/whatsNew";
 
 type TFn = ReturnType<typeof createT>;
 
@@ -280,7 +278,6 @@ export function WorkbenchSidebar(props: WorkbenchSidebarProps) {
                   : "Grok"
               }
             />
-            <SidebarUpdateButton t={tr} />
           </div>
           <div
             className="sidebar-chrome__drag"
@@ -395,7 +392,6 @@ export function WorkbenchSidebar(props: WorkbenchSidebarProps) {
           }
           labels={{
             settings: tr("sidebar.settings"),
-            whatsNew: tr("whatsNew.menu"),
             tutorial: tr("tutorial.menu"),
             theme: tr("user.theme"),
             themeSystem: tr("settings.themeSystem"),
@@ -421,7 +417,6 @@ export function WorkbenchSidebar(props: WorkbenchSidebarProps) {
           }}
           onSettings={onSettings}
           onAccountSettings={onAccountSettings}
-          onWhatsNew={() => requestWhatsNewOpen()}
           onTutorial={onTutorial}
           onTheme={applyThemeChoice}
           onThemeEditor={() => {

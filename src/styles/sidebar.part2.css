@@ -141,8 +141,15 @@
   flex-shrink: 0;
 }
 
+/* Pinned sessions sit above projects; same flex rules as Other. */
+.tree-pinned {
+  position: relative;
+  flex-shrink: 0;
+}
+
 /* Orphan sessions under Other (same row metrics and left inset as project L3). */
-.tree-orphan-list {
+.tree-orphan-list,
+.tree-pinned-list {
   display: flex;
   flex-direction: column;
   gap: 2px;

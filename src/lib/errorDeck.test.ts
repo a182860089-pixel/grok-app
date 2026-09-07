@@ -124,6 +124,16 @@ describe("buildErrorDeck", () => {
     expect(zh.problem).toMatch(/免费用量|上限/);
   });
 
+  it("classifies grok-4.5 high-demand as Rate limited, not crash/quota", () => {
+    const msg =
+      "This model is currently experiencing high demand. Please try again later.";
+    expect(looksLikeRateLimit(msg)).toBe(true);
+    expect(looksLikeTerminalQuota(msg)).toBe(false);
+    expect(classifyErrorMessage(msg)).toBe("RATE_LIMITED");
+    expect(resolveErrorDeckCode("NETWORK_PROVIDER", msg)).toBe("RATE_LIMITED");
+    expect(resolveErrorDeckCode("AGENT_CRASHED", msg)).toBe("RATE_LIMITED");
+  });
+
   it("keeps a bare 429 as Rate limited, not free-usage copy", () => {
     const msg = "API error (status 429 Too Many Requests): rate limit, retry later";
     expect(looksLikeRateLimit(msg)).toBe(true);

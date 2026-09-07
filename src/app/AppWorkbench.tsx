@@ -1354,6 +1354,8 @@ export function AppWorkbench() {
   /** Avoid writing collapse prefs before settings hydrate on launch. */
   const expandedProjectsHydratedRef = useRef(false);
   const [projectsOpen, setProjectsOpen] = useState(true);
+  /** Pinned-session tree section above projects. */
+  const [pinnedOpen, setPinnedOpen] = useState(true);
   /** Orphan / “Other sessions” tree section. Hydrated from AppSettings. */
   const [historyOpen, setHistoryOpen] = useState(true);
   /** Avoid writing other-sessions collapse before settings hydrate on launch. */
@@ -3991,11 +3993,15 @@ export function AppWorkbench() {
   const sidebarNavSessionIds = useMemo(() => {
     const ids: string[] = [];
     const projectIdSet = new Set(projects.map((p) => p.id));
+    if (pinnedOpen) {
+      const pinned = sessions.filter((s) => !!s.pinned && !s.archived);
+      for (const s of sortSessionsForSidebar(pinned)) ids.push(s.id);
+    }
     if (projectsOpen) {
       for (const proj of projects) {
         if (expandedProjects[proj.id] === false) continue;
         const projSessions = sessions.filter(
-          (s) => s.projectId === proj.id && !s.archived,
+          (s) => s.projectId === proj.id && !s.archived && !s.pinned,
         );
         for (const s of sortSessionsForSidebar(projSessions)) ids.push(s.id);
       }
@@ -4003,12 +4009,21 @@ export function AppWorkbench() {
     if (historyOpen) {
       const orphans = sessions.filter(
         (s) =>
-          (!s.projectId || !projectIdSet.has(s.projectId)) && !s.archived,
+          (!s.projectId || !projectIdSet.has(s.projectId)) &&
+          !s.archived &&
+          !s.pinned,
       );
       for (const s of sortSessionsForSidebar(orphans)) ids.push(s.id);
     }
     return ids;
-  }, [projectsOpen, projects, expandedProjects, sessions, historyOpen]);
+  }, [
+    pinnedOpen,
+    projectsOpen,
+    projects,
+    expandedProjects,
+    sessions,
+    historyOpen,
+  ]);
   sidebarNavIdsRef.current = sidebarNavSessionIds;
   sidebarNavCurrentIdRef.current =
     session.sessionId ?? viewingSessionIdRef.current ?? null;
@@ -14106,6 +14121,8 @@ export function AppWorkbench() {
             sessions={sessions}
             projectsOpen={projectsOpen}
             setProjectsOpen={setProjectsOpen}
+            pinnedOpen={pinnedOpen}
+            setPinnedOpen={setPinnedOpen}
             historyOpen={historyOpen}
             setHistoryOpen={setHistoryOpen}
             expandedProjects={expandedProjects}

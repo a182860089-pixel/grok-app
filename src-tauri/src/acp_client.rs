@@ -5526,6 +5526,11 @@ fn classify_rpc_error(e: &str) -> AgentError {
     if is_terminal_quota_reason(e) {
         return AgentError::new(AgentErrorCode::QuotaExceeded, humanize_quota_reason(e));
     }
+    // Capacity / high-demand 429s are not included-usage exhaustion — ride
+    // them out as network-provider so the host retry loop can wait.
+    if is_capacity_retry_reason(e) {
+        return AgentError::new(AgentErrorCode::NetworkProvider, e);
+    }
     let lower = e.to_lowercase();
     if lower.contains("quota")
         || lower.contains("rate limit")
@@ -5808,6 +5813,36 @@ pub fn provider_retry_abort_rpc_message(reason: &str) -> String {
     }
 }
 
+/// Transient provider capacity / overload — retry, do not treat as quota or crash.
+///
+/// Official grok-4.5 / grok-4.6 often returns a bare sentence
+/// (`This model is currently experiencing high demand. Please try again later.`)
+/// with no HTTP status. That used to fall through to `AgentCrashed` and abort
+/// the turn on the first `retry_state exhausted`.
+pub fn is_capacity_retry_reason(reason: &str) -> bool {
+    if is_terminal_quota_reason(reason) {
+        return false;
+    }
+    let r = reason.to_ascii_lowercase();
+    if r.is_empty() {
+        return false;
+    }
+    r.contains("high demand")
+        || r.contains("experiencing high")
+        || r.contains("currently experiencing")
+        || r.contains("overloaded")
+        || r.contains("temporarily unavailable")
+        || r.contains("try again later")
+        || r.contains("try again in a moment")
+        || r.contains("service unavailable")
+        || r.contains("too many requests")
+        || r.contains("rate limit")
+        || r.contains("rate_limit")
+        || r.contains("retry later")
+        || r.contains("529")
+        || (r.contains("429") && !is_terminal_quota_reason(reason))
+}
+
 /// True when the retry reason looks like a hard transport failure (not a flaky 5xx).
 pub fn is_hard_transport_retry_reason(reason: &str) -> bool {
     let r = reason.to_ascii_lowercase();
@@ -5849,10 +5884,15 @@ pub fn should_abort_provider_retry_ex(
     reason: &str,
 ) -> bool {
     let status = status.to_lowercase();
-    if status.contains("exhaust")
-        || status.contains("gave_up")
-        || status.contains("give_up")
-        || status.contains("abort")
+    let capacity = is_capacity_retry_reason(reason);
+    // Capacity / high-demand is not a terminal give-up. Aborting on the first
+    // `exhausted` cancelled `session/prompt` while the CLI (or a later host
+    // re-prompt) could still recover.
+    if !capacity
+        && (status.contains("exhaust")
+            || status.contains("gave_up")
+            || status.contains("give_up")
+            || status.contains("abort"))
     {
         return true;
     }
@@ -5863,6 +5903,9 @@ pub fn should_abort_provider_retry_ex(
         return true;
     }
     let cap = max_retries.clamp(1, HOST_PROVIDER_MAX_RETRIES);
+    if capacity {
+        return attempt >= cap;
+    }
     // Soft-fail statuses: wait until we are near the cap so mid-stream flaps
     // (common on 中转) get more reconnect room before the turn is killed.
     if status.contains("fail") || status == "error" {
@@ -6229,6 +6272,20 @@ mod retry_tests {
         let net = provider_retry_abort_error(15, 15, "HTTP 503 Service Unavailable");
         assert_eq!(net.code, AgentErrorCode::NetworkProvider);
         assert!(net.message.contains("Provider request failed after 15"));
+    }
+
+    #[test]
+    fn high_demand_is_capacity_not_quota_and_does_not_abort_early() {
+        let reason =
+            "This model is currently experiencing high demand. Please try again later.";
+        assert!(is_capacity_retry_reason(reason));
+        assert!(!is_terminal_quota_reason(reason));
+        // CLI often marks this exhausted on attempt 1 — host must keep waiting.
+        assert!(!should_abort_provider_retry_ex(1, 15, "exhausted", reason));
+        assert!(!should_abort_provider_retry_ex(8, 15, "retrying", reason));
+        assert!(should_abort_provider_retry_ex(15, 15, "exhausted", reason));
+        let err = classify_rpc_error(reason);
+        assert_eq!(err.code, AgentErrorCode::NetworkProvider, "msg={reason}");
     }
 }
 

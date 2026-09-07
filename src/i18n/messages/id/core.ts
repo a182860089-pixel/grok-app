@@ -2,7 +2,7 @@
 export const idCore = {
   "app.name": "Grok",
   "app.tagline": "MIT · Tidak resmi · Proyek saudara grok-go",
-  "app.versionFooter": "Grok v0.2.30 · MIT · Tidak resmi · Proyek saudara grok-go",
+  "app.versionFooter": "Grok v0.2.31 · MIT · Tidak resmi · Proyek saudara grok-go",
   "window.minimize": "Perkecil",
   "window.maximize": "Perbesar",
   "window.restore": "Pulihkan",

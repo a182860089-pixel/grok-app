@@ -27,6 +27,7 @@ export const ptBRSidebar = {
   "sidebar.relocateProject": "Realocar pasta…",
   "sidebar.noChats": "Sem conversas",
   "sidebar.otherSessions": "Outras",
+  "sidebar.pinned": "Fixados",
   "sidebar.dateGroup.today": "Hoje",
   "sidebar.dateGroup.yesterday": "Ontem",
   "sidebar.dateGroup.previous7": "Últimos 7 dias",

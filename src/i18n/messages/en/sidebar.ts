@@ -27,6 +27,7 @@ export const enSidebar = {
   "sidebar.relocateProject": "Relocate folder…",
   "sidebar.noChats": "No chats",
   "sidebar.otherSessions": "Other",
+  "sidebar.pinned": "Pinned",
   "sidebar.dateGroup.today": "Today",
   "sidebar.dateGroup.yesterday": "Yesterday",
   "sidebar.dateGroup.previous7": "Previous 7 days",

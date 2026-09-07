@@ -27,6 +27,7 @@ export const frSidebar = {
   "sidebar.relocateProject": "Redéfinir le dossier…",
   "sidebar.noChats": "Aucune conversation",
   "sidebar.otherSessions": "Autres",
+  "sidebar.pinned": "Épinglés",
   "sidebar.dateGroup.today": "Aujourd’hui",
   "sidebar.dateGroup.yesterday": "Hier",
   "sidebar.dateGroup.previous7": "7 derniers jours",

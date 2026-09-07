@@ -27,6 +27,7 @@ export const esSidebar = {
   "sidebar.relocateProject": "Reubicar carpeta…",
   "sidebar.noChats": "Sin chats",
   "sidebar.otherSessions": "Otros",
+  "sidebar.pinned": "Fijados",
   "sidebar.dateGroup.today": "Hoy",
   "sidebar.dateGroup.yesterday": "Ayer",
   "sidebar.dateGroup.previous7": "Últimos 7 días",

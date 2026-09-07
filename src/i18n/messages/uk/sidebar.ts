@@ -27,6 +27,7 @@ export const ukSidebar = {
   "sidebar.relocateProject": "Змінити розташування теки…",
   "sidebar.noChats": "Немає чатів",
   "sidebar.otherSessions": "Інші",
+  "sidebar.pinned": "Закріплені",
   "sidebar.dateGroup.today": "Сьогодні",
   "sidebar.dateGroup.yesterday": "Учора",
   "sidebar.dateGroup.previous7": "Останні 7 днів",

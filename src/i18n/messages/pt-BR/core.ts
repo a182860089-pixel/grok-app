@@ -2,7 +2,7 @@
 export const ptBRCore = {
   "app.name": "Grok",
   "app.tagline": "MIT · Não oficial · Projeto irmão grok-go",
-  "app.versionFooter": "Grok v0.2.30 · MIT · Não oficial · Projeto irmão grok-go",
+  "app.versionFooter": "Grok v0.2.31 · MIT · Não oficial · Projeto irmão grok-go",
   "window.minimize": "Minimizar",
   "window.maximize": "Maximizar",
   "window.restore": "Restaurar",

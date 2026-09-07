@@ -64,8 +64,8 @@ export function rewriteLoopbackUrl(
   return `${t.scheme}://127.0.0.1:${localPort}${rest}`;
 }
 
-/** New tab when the picker does not pass a URL. Avoids hanging on google.com. */
-export const DEFAULT_BROWSER_URL = "about:blank";
+/** New tab landing page so the embedded browser never opens as a blank canvas. */
+export const DEFAULT_BROWSER_URL = "https://example.com";
 
 /**
  * Address-bar commit. Bare `localhost:3000` on an SSH project must be http,

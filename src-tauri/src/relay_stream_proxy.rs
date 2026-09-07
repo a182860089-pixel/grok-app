@@ -86,9 +86,21 @@ pub fn should_drop_sse_data_payload(payload: &str) -> bool {
     false
 }
 
-/// Inject a monotonic `sequence_number` on Responses events that omit it.
+/// Patch a Responses SSE JSON payload so Grok Build's strict serde accepts it.
+///
+/// Relays (lumingapi / NewAPI clones) often emit `response.created` without
+/// `sequence_number`, `response.failed` without `created_at`, and
+/// `output_text` parts without `annotations`. CLI 1.0.13 fatals on any of
+/// those — which is why GPT `/v1/responses` "does not work" while
+/// `/v1/chat/completions` does (the Chat Completions parser is looser).
+///
 /// Returns the original payload when no rewrite is needed.
 pub fn inject_missing_sequence_number(payload: &str, seq: &mut u64) -> String {
+    sanitize_response_sse_payload(payload, seq)
+}
+
+/// See [`inject_missing_sequence_number`].
+pub fn sanitize_response_sse_payload(payload: &str, seq: &mut u64) -> String {
     let raw = payload.trim();
     if raw.is_empty() || raw == "[DONE]" {
         return payload.to_string();
@@ -96,18 +108,122 @@ pub fn inject_missing_sequence_number(payload: &str, seq: &mut u64) -> String {
     let Ok(mut v) = serde_json::from_str::<serde_json::Value>(raw) else {
         return payload.to_string();
     };
-    let t = v.get("type").and_then(|x| x.as_str()).unwrap_or("");
-    if t.starts_with("response.") && v.get("sequence_number").is_none() {
+    let is_response_event = v
+        .get("type")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .starts_with("response.");
+    if !is_response_event {
+        return payload.to_string();
+    }
+    let mut changed = false;
+    if v.get("sequence_number").is_none() {
         if let Some(obj) = v.as_object_mut() {
-            obj.insert(
-                "sequence_number".into(),
-                serde_json::Value::from(*seq),
-            );
+            obj.insert("sequence_number".into(), serde_json::Value::from(*seq));
             *seq = seq.saturating_add(1);
-            return v.to_string();
+            changed = true;
         }
     }
-    payload.to_string()
+    if let Some(resp) = v.get_mut("response").and_then(|r| r.as_object_mut()) {
+        if patch_response_object(resp) {
+            changed = true;
+        }
+    }
+    if patch_output_text_annotations(&mut v) {
+        changed = true;
+    }
+    if changed {
+        v.to_string()
+    } else {
+        payload.to_string()
+    }
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Fill required fields on the nested `response` object.
+fn patch_response_object(resp: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let mut changed = false;
+    if !resp.contains_key("created_at") {
+        resp.insert("created_at".into(), serde_json::Value::from(unix_now()));
+        changed = true;
+    }
+    if !resp.contains_key("object") {
+        resp.insert("object".into(), serde_json::Value::from("response"));
+        changed = true;
+    }
+    if !resp.contains_key("output") {
+        resp.insert("output".into(), serde_json::Value::Array(Vec::new()));
+        changed = true;
+    }
+    if !resp.contains_key("status") {
+        let status = if resp.get("error").map(|e| !e.is_null()).unwrap_or(false) {
+            "failed"
+        } else {
+            "in_progress"
+        };
+        resp.insert("status".into(), serde_json::Value::from(status));
+        changed = true;
+    }
+    if let Some(output) = resp.get_mut("output") {
+        if patch_output_text_annotations(output) {
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Official Responses `output_text` parts require `annotations` (array).
+fn patch_output_text_annotations(v: &mut serde_json::Value) -> bool {
+    let mut changed = false;
+    match v {
+        serde_json::Value::Object(map) => {
+            let ty = map.get("type").and_then(|x| x.as_str()).unwrap_or("");
+            if (ty == "output_text" || ty.ends_with("output_text.done") || ty.ends_with("output_text.delta"))
+                && !map.contains_key("annotations")
+            {
+                // Deltas do not always carry annotations; `done` / part objects do.
+                if ty == "output_text" || ty.ends_with("output_text.done") {
+                    map.insert("annotations".into(), serde_json::Value::Array(Vec::new()));
+                    changed = true;
+                }
+            }
+            if let Some(part) = map.get_mut("part") {
+                if patch_output_text_annotations(part) {
+                    changed = true;
+                }
+            }
+            if let Some(content) = map.get_mut("content") {
+                if patch_output_text_annotations(content) {
+                    changed = true;
+                }
+            }
+            if let Some(item) = map.get_mut("item") {
+                if patch_output_text_annotations(item) {
+                    changed = true;
+                }
+            }
+            if let Some(output) = map.get_mut("output") {
+                if patch_output_text_annotations(output) {
+                    changed = true;
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                if patch_output_text_annotations(item) {
+                    changed = true;
+                }
+            }
+        }
+        _ => {}
+    }
+    changed
 }
 
 /// Decode streaming UTF-8 without corrupting multi-byte chars at chunk boundaries.
@@ -699,6 +815,38 @@ mod tests {
         let v2: serde_json::Value = serde_json::from_str(&again).unwrap();
         assert_eq!(v2["sequence_number"], 0);
         assert_eq!(seq, 1);
+    }
+
+    #[test]
+    fn gpt_lumingapi_response_created_gets_sequence_number() {
+        // Live stderr from gpt-6-astra on lumingapi /v1/responses.
+        let raw = r#"{"response":{"created_at":1788585119,"id":"resp-202609050511592724885758268d9d6rbhCGur2","model":"gpt-6-astra","object":"response","output":[],"status":"in_progress"},"type":"response.created"}"#;
+        let mut seq = 0u64;
+        let out = sanitize_response_sse_payload(raw, &mut seq);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["sequence_number"], 0);
+        assert_eq!(v["response"]["created_at"], 1788585119);
+        assert_eq!(seq, 1);
+    }
+
+    #[test]
+    fn response_failed_gets_created_at() {
+        let raw = r#"{"type":"response.failed","response":{"id":"resp_abc","object":"response","model":"grok-4.6","status":"failed","output":[],"error":{"code":"upstream_error","message":"Upstream service temporarily unavailable"}}}"#;
+        let mut seq = 0u64;
+        let out = sanitize_response_sse_payload(raw, &mut seq);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["sequence_number"], 0);
+        assert!(v["response"]["created_at"].as_i64().unwrap() > 0);
+    }
+
+    #[test]
+    fn output_text_part_gets_annotations() {
+        let raw = r#"{"type":"response.content_part.added","item_id":"msg_1","output_index":0,"content_index":0,"part":{"type":"output_text","text":"hi"}}"#;
+        let mut seq = 0u64;
+        let out = sanitize_response_sse_payload(raw, &mut seq);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["sequence_number"], 0);
+        assert_eq!(v["part"]["annotations"], serde_json::json!([]));
     }
 
     #[test]

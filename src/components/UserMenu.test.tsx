@@ -2,6 +2,8 @@
  * @vitest-environment jsdom
  */
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { expect, it, vi } from "vitest";
@@ -61,6 +63,46 @@ function Harness({ collapsed }: { collapsed: boolean }) {
     </>
   );
 }
+
+it("keeps sidebar search and drops the logo-adjacent update button", () => {
+  const sidebar = readFileSync(
+    resolve(__dirname, "../app/WorkbenchSidebar.tsx"),
+    "utf8",
+  );
+  expect(sidebar).toContain('tr("sidebar.search")');
+  expect(sidebar).toContain("onOpenSearch");
+  expect(sidebar).not.toContain("SidebarUpdateButton");
+  const menu = readFileSync(resolve(__dirname, "./UserMenu.tsx"), "utf8");
+  expect(menu).not.toContain("onWhatsNew");
+  expect(menu).not.toContain("whatsNew");
+});
+
+it("does not render a what's-new / 更新公告 entry", () => {
+  const view = render(
+    <UserMenu
+      open
+      onClose={() => undefined}
+      theme="dark"
+      themePreference="dark"
+      locale="en"
+      labels={labels}
+      account={null}
+      activeProvider={null}
+      accountBusy={false}
+      onSettings={() => undefined}
+      onAccountSettings={() => undefined}
+      onTheme={() => undefined}
+      onLogin={() => undefined}
+      onLogout={() => undefined}
+    >
+      <button type="button">Account</button>
+    </UserMenu>,
+  );
+  expect(screen.queryByRole("menuitem", { name: /what.?s new|更新公告/i })).toBeNull();
+  expect(screen.queryByText("What's new")).toBeNull();
+  expect(screen.queryByText("更新公告")).toBeNull();
+  view.unmount();
+});
 
 it("opens the theme editor from the theme submenu footer group", async () => {
   const onThemeEditor = vi.fn();

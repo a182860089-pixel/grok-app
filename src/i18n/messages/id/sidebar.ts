@@ -27,6 +27,7 @@ export const idSidebar = {
   "sidebar.relocateProject": "Pindahkan folder…",
   "sidebar.noChats": "Tidak ada obrolan",
   "sidebar.otherSessions": "Lainnya",
+  "sidebar.pinned": "Tersemat",
   "sidebar.dateGroup.today": "Hari ini",
   "sidebar.dateGroup.yesterday": "Kemarin",
   "sidebar.dateGroup.previous7": "7 hari terakhir",

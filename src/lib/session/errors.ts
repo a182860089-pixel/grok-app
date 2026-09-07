@@ -13,9 +13,30 @@ import type {
 } from "../errorDeck";
 import type { AgentError, AgentErrorCode, ChatMessage, TurnErrorPayload } from "./types";
 
+/** True when an in-flight assistant already has painted body / thought / tools. */
+export function assistantHasKeepableBody(m: ChatMessage): boolean {
+  if ((m.content ?? "").trim()) return true;
+  if ((m.thought ?? "").trim()) return true;
+  if (m.thoughtPhases?.some((p) => (p ?? "").trim())) return true;
+  if (m.attachments && m.attachments.length > 0) return true;
+  if (
+    m.segments?.some((s) => {
+      if (s.kind === "tool") return true;
+      return !!(s.text ?? "").trim();
+    })
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Convert in-flight thinking bubble into a persistent error row in the thread.
  * If no streaming assistant exists, append a new error message.
+ *
+ * When the live assistant already has body / thought / tools, **keep** that
+ * row and append the error. Replacing it used to wipe streamed tokens on
+ * high-demand / interrupt — the user then lost context and had to resend.
  *
  * Stores a friendly, locale-aware body (not raw RPC/MCP dumps).
  */
@@ -48,9 +69,28 @@ export function applyTurnError(
     }
   }
 
+  const freezeStreaming = (list: ChatMessage[], keepIdx: number) =>
+    list.map((m, i) =>
+      i !== keepIdx && m.streaming ? { ...m, streaming: false } : m,
+    );
+
   if (idx >= 0) {
     const next = messages.slice();
     const prev = next[idx]!;
+    if (assistantHasKeepableBody(prev) && !prev.isError) {
+      next[idx] = { ...prev, streaming: false };
+      const errId = mid && mid !== prev.id ? mid : `err-${Date.now()}`;
+      return [
+        ...freezeStreaming(next, idx),
+        {
+          id: errId,
+          role: "assistant",
+          content,
+          streaming: false,
+          isError: true,
+        },
+      ];
+    }
     next[idx] = {
       ...prev,
       id: mid || prev.id,
@@ -60,9 +100,7 @@ export function applyTurnError(
       isError: true,
     };
     // Clear any other lingering streaming flags
-    return next.map((m, i) =>
-      i !== idx && m.streaming ? { ...m, streaming: false } : m,
-    );
+    return freezeStreaming(next, idx);
   }
 
   return [

@@ -20,21 +20,26 @@ import {
 
 export type CatalogProject = { id: string };
 
-/** Visual order for Shift-range select: all projects, then orphans. Expand state ignored. */
+/** Visual order for Shift-range select: pinned, then projects, then orphans. Expand state ignored. */
 export function sessionSidebarSelectOrder(
   sessions: readonly SessionRow[],
   projects: readonly CatalogProject[],
 ): string[] {
   const ids: string[] = [];
   const projectIdSet = new Set(projects.map((p) => p.id));
+  const pinned = sessions.filter((s) => !!s.pinned && !s.archived);
+  for (const s of sortSessionsForSidebar(pinned)) ids.push(s.id);
   for (const proj of projects) {
     const projSessions = sessions.filter(
-      (s) => s.projectId === proj.id && !s.archived,
+      (s) => s.projectId === proj.id && !s.archived && !s.pinned,
     );
     for (const s of sortSessionsForSidebar(projSessions)) ids.push(s.id);
   }
   const orphans = sessions.filter(
-    (s) => (!s.projectId || !projectIdSet.has(s.projectId)) && !s.archived,
+    (s) =>
+      (!s.projectId || !projectIdSet.has(s.projectId)) &&
+      !s.archived &&
+      !s.pinned,
   );
   for (const s of sortSessionsForSidebar(orphans)) ids.push(s.id);
   return ids;

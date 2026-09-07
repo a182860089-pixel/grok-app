@@ -27,6 +27,7 @@ export const taSidebar = {
   "sidebar.relocateProject": "கோப்புறையை மாற்று…",
   "sidebar.noChats": "உரையாடல்கள் இல்லை",
   "sidebar.otherSessions": "மற்றவை",
+  "sidebar.pinned": "பொருத்தப்பட்டவை",
   "sidebar.dateGroup.today": "இன்று",
   "sidebar.dateGroup.yesterday": "நேற்று",
   "sidebar.dateGroup.previous7": "கடந்த 7 நாட்கள்",

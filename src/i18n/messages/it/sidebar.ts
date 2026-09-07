@@ -27,6 +27,7 @@ export const itSidebar = {
   "sidebar.relocateProject": "Riposiziona cartella…",
   "sidebar.noChats": "Nessuna chat",
   "sidebar.otherSessions": "Altre",
+  "sidebar.pinned": "Fissate",
   "sidebar.dateGroup.today": "Oggi",
   "sidebar.dateGroup.yesterday": "Ieri",
   "sidebar.dateGroup.previous7": "Ultimi 7 giorni",

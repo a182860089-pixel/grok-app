@@ -6,7 +6,9 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
-use crate::acp_client::{AcpClient, AskUserOutcome, PermissionOutcome};
+use crate::acp_client::{
+    is_capacity_retry_reason, AcpClient, AskUserOutcome, PermissionOutcome,
+};
 use crate::error::{AgentError, AgentErrorCode};
 use crate::journal_throttle::is_paragraph_break;
 use crate::mock_acp::{self, StreamChunk};
@@ -493,12 +495,67 @@ impl SessionManager {
             // Explicit session id: on a shared process the CLI's “recently
             // bound” id may belong to another App session — prompts must
             // target this chat's own agent session.
-            let outcome = match agent_sid {
-                Some(sid) => acp.prompt_for(&sid, &agent_prompt).await,
-                None => Err(AgentError::new(
-                    AgentErrorCode::AgentCrashed,
-                    "chat has no agent session id (reconnect)",
-                )),
+            //
+            // Capacity / high-demand (grok-4.5/4.6) often fails the whole
+            // `session/prompt` without an internal retry_state loop. Re-issue
+            // a few times with backoff when nothing has been streamed yet so
+            // the user does not have to resend and lose the turn.
+            const CAPACITY_PROMPT_RETRIES: u32 = 3;
+            let mut capacity_attempt = 0u32;
+            let outcome = loop {
+                let result = match &agent_sid {
+                    Some(sid) => acp.prompt_for(sid, &agent_prompt).await,
+                    None => Err(AgentError::new(
+                        AgentErrorCode::AgentCrashed,
+                        "chat has no agent session id (reconnect)",
+                    )),
+                };
+                match result {
+                    Ok(()) => break Ok(()),
+                    Err(e) => {
+                        capacity_attempt += 1;
+                        let can_retry = is_capacity_retry_reason(&e.message)
+                            && capacity_attempt <= CAPACITY_PROMPT_RETRIES
+                            && mgr
+                                .with_session_mut(&turn_sid, |s| {
+                                    s.tools_this_turn == 0
+                                        && s.open_tool_ids.is_empty()
+                                        && s.stream_buf.is_empty()
+                                        && !s.saw_model_output
+                                        && !s.provider_retry_aborted
+                                        && matches!(
+                                            s.fsm.state(),
+                                            SessionState::Streaming
+                                                | SessionState::AwaitingPermission
+                                        )
+                                })
+                                .unwrap_or(false);
+                        if !can_retry {
+                            break Err(e);
+                        }
+                        let backoff_secs = 4u64.saturating_mul(1u64 << (capacity_attempt - 1).min(3));
+                        tracing::warn!(
+                            target: "session",
+                            session = %turn_sid,
+                            attempt = capacity_attempt,
+                            wait_secs = backoff_secs,
+                            "capacity / high-demand prompt retry: {}",
+                            e.message
+                        );
+                        let _ = app2.emit(
+                            "session://retry",
+                            serde_json::json!({
+                                "sessionId": turn_sid,
+                                "attempt": capacity_attempt,
+                                "maxRetries": CAPACITY_PROMPT_RETRIES,
+                                "reason": e.message,
+                                "status": "retrying",
+                                "aborting": false,
+                            }),
+                        );
+                        tokio::time::sleep(Duration::from_secs(backoff_secs)).await;
+                    }
+                }
             };
             match outcome {
                 Err(e) => {

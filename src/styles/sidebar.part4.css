@@ -6,7 +6,8 @@ html[data-sidebar-density="compact"] .tree-l3-list-wrap {
 }
 
 html[data-sidebar-density="compact"] .tree-l3-list,
-html[data-sidebar-density="compact"] .tree-orphan-list {
+html[data-sidebar-density="compact"] .tree-orphan-list,
+html[data-sidebar-density="compact"] .tree-pinned-list {
   gap: 0;
 }
 

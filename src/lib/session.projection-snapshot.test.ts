@@ -427,6 +427,40 @@ describe("session projection", () => {
     expect(err.content).not.toMatch(/Connection refused|stderr|rpc timeout/i);
   });
 
+  it("applyTurnError keeps streamed body and appends the error row", () => {
+    let messages: ChatMessage[] = [
+      { id: "u1", role: "user", content: "hi" },
+      {
+        id: "a-live",
+        role: "assistant",
+        content: "already painted answer",
+        thought: "thinking so far",
+        streaming: true,
+      },
+    ];
+    messages = applyTurnError(
+      messages,
+      {
+        messageId: "a-live",
+        code: "NETWORK_PROVIDER",
+        message:
+          "This model is currently experiencing high demand. Please try again later.",
+        content:
+          "**NETWORK_PROVIDER**\n\nThis model is currently experiencing high demand. Please try again later.",
+      },
+      "en",
+    );
+    expect(messages).toHaveLength(3);
+    expect(messages[1]!.id).toBe("a-live");
+    expect(messages[1]!.content).toBe("already painted answer");
+    expect(messages[1]!.thought).toBe("thinking so far");
+    expect(messages[1]!.isError).toBeFalsy();
+    expect(messages[1]!.streaming).toBe(false);
+    expect(messages[2]!.isError).toBe(true);
+    expect(messages[2]!.streaming).toBe(false);
+    expect(messages[2]!.id).not.toBe("a-live");
+  });
+
   it("applyGeneratedImage attaches to streaming assistant and dedupes", () => {
     let messages: ChatMessage[] = [
       { id: "u1", role: "user", content: "draw a cat" },

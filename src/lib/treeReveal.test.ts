@@ -240,6 +240,23 @@ describe("project / orphan flex shrink", () => {
   it("keeps open project folders from shrinking below their session list", () => {
     expect(part1b).toMatch(/\.tree-project\s*\{[^}]*flex-shrink:\s*0/);
     expect(part2).toMatch(/\.tree-orphan\s*\{[^}]*flex-shrink:\s*0/);
+    expect(part2).toMatch(/\.tree-pinned\s*\{[^}]*flex-shrink:\s*0/);
+  });
+});
+
+describe("Pinned sessions tree wrap", () => {
+  const src = readFileSync(
+    resolve(__dirname, "../app/WorkbenchSessionTree.tsx"),
+    "utf8",
+  );
+
+  it("renders the pinned L1 section before projects", () => {
+    const pinned = src.indexOf('className="tree-pinned"');
+    const projects = src.indexOf("{/* L1 — Projects section */}");
+    expect(pinned).toBeGreaterThan(0);
+    expect(projects).toBeGreaterThan(pinned);
+    expect(src).toMatch(/tr\("sidebar\.pinned"\)/);
+    expect(src).toMatch(/SidebarTreeReveal open=\{pinnedOpen\}/);
   });
 });
 

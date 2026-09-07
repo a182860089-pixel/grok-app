@@ -1,5 +1,5 @@
 /**
- * Sidebar session tree: projects, orphans, multi-select bar.
+ * Sidebar session tree: pinned, projects, orphans, multi-select bar.
  * Catalog paint lives here. Open/new-chat and UserMenu stay with the host.
  */
 import type { CSSProperties, Dispatch, MouseEvent, ReactNode, SetStateAction } from "react";
@@ -57,6 +57,8 @@ export type WorkbenchSessionTreeProps = {
   sessions: SessionRow[];
   projectsOpen: boolean;
   setProjectsOpen: Dispatch<SetStateAction<boolean>>;
+  pinnedOpen: boolean;
+  setPinnedOpen: Dispatch<SetStateAction<boolean>>;
   historyOpen: boolean;
   setHistoryOpen: Dispatch<SetStateAction<boolean>>;
   expandedProjects: Record<string, boolean>;
@@ -117,6 +119,8 @@ export function WorkbenchSessionTree(props: WorkbenchSessionTreeProps) {
     sessions,
     projectsOpen,
     setProjectsOpen,
+    pinnedOpen,
+    setPinnedOpen,
     historyOpen,
     setHistoryOpen,
     expandedProjects,
@@ -168,11 +172,20 @@ export function WorkbenchSessionTree(props: WorkbenchSessionTreeProps) {
     (p) => !hideSshProjectInLocalTree(p, watchAliases),
   );
   const sessionsForProject = (projectId: string) =>
-    sessions.filter((s) => s.projectId === projectId && !s.archived);
+    sessions.filter(
+      (s) => s.projectId === projectId && !s.archived && !s.pinned,
+    );
+  const pinnedSessions = sessions.filter((s) => !!s.pinned && !s.archived);
+  const pinnedSessionIds = pinnedSessions.map((s) => s.id);
+  const pinnedAllSelected = areAllIdsSelected(
+    selectedSessionIds,
+    pinnedSessionIds,
+  );
   const orphanSessions = sessions.filter(
     (s) =>
       (!s.projectId || !projects.some((p) => p.id === s.projectId)) &&
-      !s.archived,
+      !s.archived &&
+      !s.pinned,
   );
   const orphanSessionIds = orphanSessions.map((s) => s.id);
   const orphanAllSelected = areAllIdsSelected(
@@ -180,6 +193,45 @@ export function WorkbenchSessionTree(props: WorkbenchSessionTreeProps) {
     orphanSessionIds,
   );
   const session = { sessionId: viewingSessionId };
+  const renderSessionRow = (
+    s: SessionRow,
+    variant: "project" | "orphan",
+  ) => {
+    const working = busyIds.has(s.id);
+    const checked = selectedSessionIds.has(s.id);
+    const unread = unreadSessionIds.has(s.id);
+    const planPending = planPendingSessionIds.has(s.id);
+    const noteRaw = sessionNotesMap[s.id]?.trim() || "";
+    return (
+      <SidebarSessionRow
+        session={s}
+        variant={variant}
+        active={session.sessionId === s.id}
+        working={working}
+        unread={unread}
+        planPending={planPending}
+        checked={checked}
+        selectMode={sessionSelectMode}
+        muted={mutedSessionIds.has(s.id)}
+        noteTitle={
+          noteRaw
+            ? notePreview(noteRaw) || sidebarSessionLabels.noteAria
+            : null
+        }
+        worktreeBadge={buildSidebarWorktreeBadge(s)}
+        labels={sidebarSessionLabels}
+        locale={locale}
+        showRelativeTime={sidebarShowRelativeTime}
+        onOpen={onSidebarSessionOpen}
+        onContextMenu={onSidebarSessionContextMenu}
+        onToggleSelect={toggleSessionSelected}
+        onPin={onSidebarSessionPin}
+        onArchive={onSidebarSessionArchive}
+        onMenu={onSidebarSessionMenu}
+        onRename={onSidebarSessionRename}
+      />
+    );
+  };
 
   return (
     <>
@@ -188,6 +240,115 @@ export function WorkbenchSessionTree(props: WorkbenchSessionTreeProps) {
             viewportClassName="sidebar__scroll-inner"
             syncTreeReveal
           >
+            {/* Pinned sessions — above projects, in the gap under sidebar-nav */}
+            <div className="tree-pinned">
+            <div className="tree-l1">
+              <button
+                type="button"
+                className="tree-l1__head"
+                aria-expanded={pinnedOpen}
+                onClick={() => setPinnedOpen((v) => !v)}
+                aria-label={tr("sidebar.pinned")}
+              >
+                <span className="tree-l1__chevron" aria-hidden>
+                  {pinnedOpen ? (
+                    <IconChevronDown size={14} />
+                  ) : (
+                    <IconChevronRight size={14} />
+                  )}
+                </span>
+                <span className="tree-l1__label">
+                  {tr("sidebar.pinned")}
+                </span>
+              </button>
+              {!sessionSelectMode ? (
+                <div className="tree-l1__actions">
+                  <Tip label={tr("sidebar.select")}>
+                    <button
+                      type="button"
+                      className="tree-l1__action"
+                      aria-label={tr("sidebar.select")}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        enterSessionSelectMode();
+                      }}
+                    >
+                      <IconListCheck size={15} />
+                    </button>
+                  </Tip>
+                </div>
+              ) : (
+                <div className="tree-l1__actions tree-l1__actions--select-mode">
+                  <button
+                    type="button"
+                    className={
+                      "tree-l1__select-all" +
+                      (pinnedAllSelected ? " tree-l1__select-all--on" : "")
+                    }
+                    aria-label={
+                      pinnedAllSelected
+                        ? tr("sidebar.deselectAllInGroup")
+                        : tr("sidebar.selectAllInGroup")
+                    }
+                    aria-pressed={pinnedAllSelected}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleSessionsSelected(pinnedSessionIds);
+                    }}
+                  >
+                    <span
+                      className={
+                        "tree-l3__check" +
+                        (pinnedAllSelected ? " is-on" : "")
+                      }
+                      aria-hidden
+                    >
+                      {pinnedAllSelected ? (
+                        <IconCheck size={11} stroke={2.4} />
+                      ) : null}
+                    </span>
+                    <span className="tree-l1__select-all-label">
+                      {pinnedAllSelected
+                        ? tr("sidebar.deselectAllInGroup")
+                        : tr("sidebar.selectAllInGroup")}
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
+            {(() => {
+                  const sortedPinned = sortSessionsForSidebar(pinnedSessions);
+                  return (
+                    <SidebarTreeReveal open={pinnedOpen}>
+                      <div className="tree-l3-list-wrap">
+                      <VirtualList
+                        className="tree-pinned-list"
+                        items={sortedPinned}
+                        getKey={(s) => s.id}
+                        rowHeight={sidebarRowMetrics.rowHeight}
+                        gap={sidebarRowMetrics.gap}
+                        scrollToKey={
+                          session.sessionId &&
+                          sortedPinned.some((x) => x.id === session.sessionId)
+                            ? session.sessionId
+                            : null
+                        }
+                        renderItem={(s) =>
+                          renderSessionRow(
+                            s,
+                            s.projectId &&
+                              projects.some((p) => p.id === s.projectId)
+                              ? "project"
+                              : "orphan",
+                          )
+                        }
+                      />
+                      </div>
+                    </SidebarTreeReveal>
+                  );
+                })()}
+            </div>
+
             {/* L1 — Projects section */}
             <div className="tree-l1">
               <button
@@ -554,52 +715,9 @@ export function WorkbenchSessionTree(props: WorkbenchSessionTreeProps) {
                                       ? session.sessionId
                                       : null
                                   }
-                                  renderItem={(s) => {
-                                    const working = busyIds.has(s.id);
-                                    const checked =
-                                      selectedSessionIds.has(s.id);
-                                    const unread = unreadSessionIds.has(s.id);
-                                    const planPending =
-                                      planPendingSessionIds.has(s.id);
-                                    const noteRaw =
-                                      sessionNotesMap[s.id]?.trim() || "";
-                                    return (
-                                      <SidebarSessionRow
-                                        session={s}
-                                        variant="project"
-                                        active={session.sessionId === s.id}
-                                        working={working}
-                                        unread={unread}
-                                        planPending={planPending}
-                                        checked={checked}
-                                        selectMode={sessionSelectMode}
-                                        muted={mutedSessionIds.has(s.id)}
-                                        noteTitle={
-                                          noteRaw
-                                            ? notePreview(noteRaw) ||
-                                              sidebarSessionLabels.noteAria
-                                            : null
-                                        }
-                                        worktreeBadge={buildSidebarWorktreeBadge(
-                                          s,
-                                        )}
-                                        labels={sidebarSessionLabels}
-                                        locale={locale}
-                                        showRelativeTime={
-                                          sidebarShowRelativeTime
-                                        }
-                                        onOpen={onSidebarSessionOpen}
-                                        onContextMenu={
-                                          onSidebarSessionContextMenu
-                                        }
-                                        onToggleSelect={toggleSessionSelected}
-                                        onPin={onSidebarSessionPin}
-                                        onArchive={onSidebarSessionArchive}
-                                        onMenu={onSidebarSessionMenu}
-                                        onRename={onSidebarSessionRename}
-                                      />
-                                    );
-                                  }}
+                                  renderItem={(s) =>
+                                    renderSessionRow(s, "project")
+                                  }
                                 />
                               );
                             })()
@@ -713,45 +831,7 @@ export function WorkbenchSessionTree(props: WorkbenchSessionTreeProps) {
                             ? session.sessionId
                             : null
                         }
-                        renderItem={(s) => {
-                          const working = busyIds.has(s.id);
-                          const checked = selectedSessionIds.has(s.id);
-                          const unread = unreadSessionIds.has(s.id);
-                          const planPending =
-                            planPendingSessionIds.has(s.id);
-                          const noteRaw =
-                            sessionNotesMap[s.id]?.trim() || "";
-                          return (
-                            <SidebarSessionRow
-                              session={s}
-                              variant="orphan"
-                              active={session.sessionId === s.id}
-                              working={working}
-                              unread={unread}
-                              planPending={planPending}
-                              checked={checked}
-                              selectMode={sessionSelectMode}
-                              muted={mutedSessionIds.has(s.id)}
-                              noteTitle={
-                                noteRaw
-                                  ? notePreview(noteRaw) ||
-                                    sidebarSessionLabels.noteAria
-                                  : null
-                              }
-                              worktreeBadge={buildSidebarWorktreeBadge(s)}
-                              labels={sidebarSessionLabels}
-                              locale={locale}
-                              showRelativeTime={sidebarShowRelativeTime}
-                              onOpen={onSidebarSessionOpen}
-                              onContextMenu={onSidebarSessionContextMenu}
-                              onToggleSelect={toggleSessionSelected}
-                              onPin={onSidebarSessionPin}
-                              onArchive={onSidebarSessionArchive}
-                              onMenu={onSidebarSessionMenu}
-                              onRename={onSidebarSessionRename}
-                            />
-                          );
-                        }}
+                        renderItem={(s) => renderSessionRow(s, "orphan")}
                       />
                       </div>
                     </SidebarTreeReveal>

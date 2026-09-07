@@ -27,6 +27,7 @@ export const zhTWSidebar = {
   "sidebar.relocateProject": "重新定位資料夾…",
   "sidebar.noChats": "尚無對話",
   "sidebar.otherSessions": "其他對話",
+  "sidebar.pinned": "置頂",
   "sidebar.dateGroup.today": "今天",
   "sidebar.dateGroup.yesterday": "昨天",
   "sidebar.dateGroup.previous7": "近 7 天",

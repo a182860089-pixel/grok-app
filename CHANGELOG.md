@@ -13,6 +13,12 @@ See `docs/llm-wiki/release.md`.
 
 ## [Unreleased]
 
+## [0.2.31] - 2026-09-07
+
+> **Highlight:** Busy-model retries wait instead of dying, and interrupted turns keep their text.
+>
+> **中文 · 亮点：** 高峰会等会再试，中断也不再把已经打出来的字抹掉。
+
 ### Changed
 - The in-app browser MCP listener starts on the first session connect or the first Browser tab, not at app launch.
 - The local session API binds 2.5s after launch so it does not contend with first paint. The chat transcript chunk loads with the chat stage instead of the first JS payload.
@@ -30,12 +36,18 @@ See `docs/llm-wiki/release.md`.
 - 侧栏 / 右栏 / 底栏拖过上限会发黏，松手再吸回。Win/Linux 侧栏实心不再套 CSS blur。系统开了减少动态时壁纸视频停。异常重启会写 logs/last_crash.json（pid、脏 lease、上次原生异常行）。
 
 ### Fixed
+- High-demand and 429 capacity errors wait and retry instead of aborting the turn on the first fail.
+- Interrupted or failed turns keep already-streamed text. The error is a new row, not a wipe.
+- GPT and other custom Responses streams missing sequence_number, created_at, or annotations no longer crash the CLI.
 - Custom-model chats no longer switch models between turn 1 and turn 2. Picker `app_models` ids resolve to the same config section for spawn and reconnect (#1000).
 - Windows can add a project by dropping a folder on the sidebar again. Native drag-drop paths are restored; path-less sidebar drops show a clear hint instead of doing nothing (#999).
 - Chat no longer crashes mid-stream with React error #30 when a turn fails. Assistant timeline work no longer runs after early returns on the same row (#1002).
 - Phone mirror turns finish on the phone, and the desktop shows the phone’s message. Session stream/state events fan out to mirror clients again (#1001).
 
 **中文 · 修复**
+- 高峰 / 429 会等待并重试，不再第一下就掐掉这一轮。
+- 中断或失败时已经打出来的正文会留下，错误另开一行，不再整段覆盖。
+- GPT 等自定义 Responses 流缺 sequence_number / created_at / annotations 时不再把 CLI 打崩。
 - 自定义模型会话不会再在第一轮与第二轮之间悄悄换模型。选择器里的 `app_models` id 会在启动与重连时解析成同一个配置段（#1000）。
 - Windows 又能把文件夹拖到侧栏加为项目。已恢复原生拖放路径；读不到路径时会提示，不再没反应（#999）。
 - 回合失败时聊天区不再因 React #30 崩溃。同一条助手消息不会在提前返回后再跑时间线 hooks（#1002）。
